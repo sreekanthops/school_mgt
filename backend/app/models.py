@@ -1,8 +1,7 @@
 import datetime as dt
-from datetime import date
 from typing import Optional
 
-from sqlalchemy import Date, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -13,30 +12,69 @@ EXAMS = [("UT1", 25), ("Midterm", 50), ("UT2", 25), ("Final", 100)]
 EXAM_MAX = dict(EXAMS)
 
 
+def _school_fk() -> Mapped[int]:
+    return mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), index=True)
+
+
+class School(Base):
+    __tablename__ = "schools"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    about: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    mission: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    vision: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    contact: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    founded: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.date] = mapped_column(Date, default=dt.date.today)
+
+
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
+    # NULL school_id => platform superadmin
+    school_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("schools.id", ondelete="CASCADE"), index=True, nullable=True)
     username: Mapped[str] = mapped_column(String(50), unique=True)
     password_hash: Mapped[str] = mapped_column(String(100))
-    role: Mapped[str] = mapped_column(String(20))  # admin | teacher
+    role: Mapped[str] = mapped_column(String(20))  # superadmin | admin | staff | student
     full_name: Mapped[str] = mapped_column(String(100))
+    permissions: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # comma separated (staff only)
+    student_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("students.id", ondelete="CASCADE"), nullable=True, unique=True)
+    staff_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("staff.id", ondelete="SET NULL"), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class Subject(Base):
     __tablename__ = "subjects"
-    __table_args__ = (UniqueConstraint("name", "grade"),)
+    __table_args__ = (UniqueConstraint("school_id", "name", "grade"),)
     id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
     name: Mapped[str] = mapped_column(String(80))
     grade: Mapped[str] = mapped_column(String(5), index=True)
 
 
+class Chapter(Base):
+    __tablename__ = "chapters"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subject_id: Mapped[int] = mapped_column(ForeignKey("subjects.id", ondelete="CASCADE"), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(150))
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
 class Student(Base):
     __tablename__ = "students"
+    __table_args__ = (UniqueConstraint("school_id", "admission_no"),)
     id: Mapped[int] = mapped_column(primary_key=True)
-    admission_no: Mapped[str] = mapped_column(String(20), unique=True)
+    school_id: Mapped[int] = _school_fk()
+    admission_no: Mapped[str] = mapped_column(String(20))
     name: Mapped[str] = mapped_column(String(100), index=True)
     gender: Mapped[str] = mapped_column(String(10))
-    dob: Mapped[date] = mapped_column(Date)
+    dob: Mapped[dt.date] = mapped_column(Date)
     grade: Mapped[str] = mapped_column(String(5), index=True)
     section: Mapped[str] = mapped_column(String(2))
     guardian_name: Mapped[str] = mapped_column(String(100))
@@ -44,6 +82,8 @@ class Student(Base):
     email: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     address: Mapped[Optional[str]] = mapped_column(String(250), nullable=True)
     blood_group: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
+    photo: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    pending_photo: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
 
 class Mark(Base):
@@ -73,15 +113,17 @@ class Payment(Base):
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), index=True)
     academic_year: Mapped[str] = mapped_column(String(9))
     amount: Mapped[float] = mapped_column(Float)
-    paid_on: Mapped[date] = mapped_column(Date)
+    paid_on: Mapped[dt.date] = mapped_column(Date)
     mode: Mapped[str] = mapped_column(String(20))
-    receipt_no: Mapped[str] = mapped_column(String(30), unique=True)
+    receipt_no: Mapped[str] = mapped_column(String(40), unique=True)
 
 
 class Staff(Base):
     __tablename__ = "staff"
+    __table_args__ = (UniqueConstraint("school_id", "employee_id"),)
     id: Mapped[int] = mapped_column(primary_key=True)
-    employee_id: Mapped[str] = mapped_column(String(20), unique=True)
+    school_id: Mapped[int] = _school_fk()
+    employee_id: Mapped[str] = mapped_column(String(20))
     name: Mapped[str] = mapped_column(String(100), index=True)
     gender: Mapped[str] = mapped_column(String(10))
     designation: Mapped[str] = mapped_column(String(80))
@@ -92,13 +134,15 @@ class Staff(Base):
     class_teacher_of: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     phone: Mapped[str] = mapped_column(String(20))
     email: Mapped[str] = mapped_column(String(120))
-    joined_on: Mapped[date] = mapped_column(Date)
+    joined_on: Mapped[dt.date] = mapped_column(Date)
     bio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    photo: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
 
 class Event(Base):
     __tablename__ = "events"
     id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
     title: Mapped[str] = mapped_column(String(150))
     description: Mapped[str] = mapped_column(Text)
     date: Mapped[dt.date] = mapped_column(Date, index=True)
@@ -109,24 +153,20 @@ class Event(Base):
 class GalleryItem(Base):
     __tablename__ = "gallery"
     id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
     title: Mapped[str] = mapped_column(String(150))
     category: Mapped[str] = mapped_column(String(40))
-    image_url: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+    image: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     caption: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
-    taken_on: Mapped[date] = mapped_column(Date)
+    taken_on: Mapped[dt.date] = mapped_column(Date)
 
 
 class Goal(Base):
     __tablename__ = "goals"
     id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
     title: Mapped[str] = mapped_column(String(150))
     description: Mapped[str] = mapped_column(Text)
     target_year: Mapped[int] = mapped_column(Integer)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(20), default="Planned")
-
-
-class Setting(Base):
-    __tablename__ = "settings"
-    key: Mapped[str] = mapped_column(String(50), primary_key=True)
-    value: Mapped[str] = mapped_column(Text)

@@ -9,3 +9,5 @@ node_modules/
 dist/
 .DS_Store
 .bob/
+backend/uploads/
+.pytest_cache/

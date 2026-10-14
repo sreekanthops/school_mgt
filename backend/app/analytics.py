@@ -98,27 +98,35 @@ def fee_summary(db: Session, student_id: int, year: str) -> dict:
     }
 
 
-def student_overall_map(db: Session, year: str) -> dict[int, float]:
-    """student_id -> overall % for a year, in one query."""
+def student_overall_map(db: Session, school_id: int, year: str) -> dict[int, float]:
+    """student_id -> overall % for a year (one school), in one query."""
     rows = db.execute(
         select(Mark.student_id, func.sum(Mark.score * 100.0 / Mark.max_score), func.count())
-        .where(Mark.academic_year == year).group_by(Mark.student_id)
+        .join(Student, Student.id == Mark.student_id)
+        .where(Mark.academic_year == year, Student.school_id == school_id)
+        .group_by(Mark.student_id)
     ).all()
     return {sid: round(total / n, 1) for sid, total, n in rows}
 
 
-def fee_pending_map(db: Session, year: str) -> dict[int, dict]:
-    fees = {f.student_id: f.total_amount for f in db.scalars(select(Fee).where(Fee.academic_year == year))}
+def fee_pending_map(db: Session, school_id: int, year: str) -> dict[int, dict]:
+    fees = {f.student_id: f.total_amount for f in db.scalars(
+        select(Fee).join(Student, Student.id == Fee.student_id)
+        .where(Fee.academic_year == year, Student.school_id == school_id))}
     paid = dict(db.execute(
         select(Payment.student_id, func.sum(Payment.amount))
-        .where(Payment.academic_year == year).group_by(Payment.student_id)).all())
+        .join(Student, Student.id == Payment.student_id)
+        .where(Payment.academic_year == year, Student.school_id == school_id)
+        .group_by(Payment.student_id)).all())
     return {sid: {"total": t, "paid": paid.get(sid, 0.0), "pending": max(t - paid.get(sid, 0.0), 0.0)}
             for sid, t in fees.items()}
 
 
 def class_rank(db: Session, student: Student, year: str) -> dict | None:
-    overall = student_overall_map(db, year)
-    peers = db.scalars(select(Student.id).where(Student.grade == student.grade, Student.section == student.section)).all()
+    overall = student_overall_map(db, student.school_id, year)
+    peers = db.scalars(select(Student.id).where(
+        Student.school_id == student.school_id, Student.grade == student.grade,
+        Student.section == student.section)).all()
     ranked = sorted(((overall[i], i) for i in peers if i in overall), reverse=True)
     for pos, (_, sid) in enumerate(ranked, 1):
         if sid == student.id:
@@ -126,10 +134,10 @@ def class_rank(db: Session, student: Student, year: str) -> dict | None:
     return None
 
 
-def dashboard(db: Session, year: str) -> dict:
-    students = db.scalars(select(Student)).all()
-    overall = student_overall_map(db, year)
-    fees = fee_pending_map(db, year)
+def dashboard(db: Session, school_id: int, year: str) -> dict:
+    students = db.scalars(select(Student).where(Student.school_id == school_id)).all()
+    overall = student_overall_map(db, school_id, year)
+    fees = fee_pending_map(db, school_id, year)
 
     by_grade = []
     for g in GRADES:

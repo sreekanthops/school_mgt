@@ -1,8 +1,10 @@
-"""Seed demo data. Run: python -m app.seed   (idempotent; use --reset to wipe first)
+"""Seed demo data. Run: python -m app.seed [--reset]
 
-Passwords come from ADMIN_PASSWORD / TEACHER_PASSWORD in .env; if missing they are generated
-and appended to .env (which is git-ignored).
+Creates: a platform superadmin, a demo school (owner admin, a teacher login, a student login, full
+data) and a second EMPTY school to show tenant isolation. Passwords come from *_PASSWORD variables in
+.env; any missing one is generated and appended to .env (git-ignored).
 """
+import os
 import random
 import secrets
 import sys
@@ -12,9 +14,9 @@ from sqlalchemy import select
 
 from .config import CURRENT_YEAR, ENV_PATH
 from .db import Base, SessionLocal, engine
-from .models import (EXAM_MAX, EXAMS, GRADES, Event, Fee, GalleryItem, Goal, Mark, Payment, Setting,
-                     Staff, Student, Subject, User)
-from .security import hash_password
+from .models import (EXAMS, GRADES, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, School, Staff,
+                     Student, Subject, User)
+from .security import TEACHER_DEFAULT, hash_password
 
 random.seed(42)
 
@@ -22,6 +24,17 @@ PRIMARY_EARLY = ["English", "Mathematics", "Rhymes", "Drawing", "Story Time"]
 LOWER = ["English", "Hindi", "Telugu", "Mathematics", "EVS", "Computer Basics", "Art & Craft", "Physical Education"]
 MIDDLE = ["English", "Hindi", "Telugu", "Mathematics", "Science", "Social Studies", "Computer Science", "Physical Education"]
 SECONDARY = ["English", "Hindi", "Telugu", "Mathematics", "Physics", "Chemistry", "Biology", "Social Studies", "Computer Science"]
+
+CHAPTERS = {
+    "Mathematics": ["Number Systems", "Fractions and Decimals", "Algebra Basics", "Geometry", "Data Handling"],
+    "English": ["Prose: Stories", "Poetry", "Grammar", "Writing Skills", "Reading Comprehension"],
+    "Science": ["Matter Around Us", "Living World", "Motion and Force", "Light and Sound", "Our Environment"],
+    "Physics": ["Motion", "Force and Laws", "Gravitation", "Work and Energy", "Sound"],
+    "Chemistry": ["Matter", "Atoms and Molecules", "Chemical Reactions", "Acids and Bases", "Carbon Compounds"],
+    "Biology": ["Cell Structure", "Tissues", "Life Processes", "Heredity", "Environment"],
+    "Social Studies": ["History: Early Societies", "Geography: Our Earth", "Civics: Government", "Economics Basics", "Map Skills"],
+    "Computer Science": ["Computer Basics", "Internet Safety", "Spreadsheets", "Programming Intro", "Algorithms"],
+}
 
 
 def subjects_for(grade: str) -> list[str]:
@@ -34,7 +47,6 @@ def subjects_for(grade: str) -> list[str]:
 MALE = ["Aarav", "Vihaan", "Arjun", "Rohan", "Kabir", "Ishaan", "Aditya", "Karthik", "Rahul", "Siddharth", "Varun", "Nikhil"]
 FEMALE = ["Ananya", "Diya", "Meera", "Sanvi", "Kavya", "Riya", "Aadhya", "Pooja", "Sneha", "Ishita", "Lakshmi", "Nandini"]
 LAST = ["Reddy", "Sharma", "Rao", "Patel", "Naidu", "Kumar", "Iyer", "Gupta", "Verma", "Chowdary", "Singh", "Menon"]
-
 FEE_BY_BAND = {"early": 30000, "lower": 40000, "middle": 50000, "secondary": 60000}
 
 
@@ -46,7 +58,6 @@ def fee_total(grade: str) -> float:
 
 
 def ensure_env(key: str) -> str:
-    import os
     if os.environ.get(key):
         return os.environ[key]
     val = secrets.token_urlsafe(12)
@@ -55,10 +66,6 @@ def ensure_env(key: str) -> str:
     os.environ[key] = val
     print(f"Generated {key} and saved it to backend/.env")
     return val
-
-
-def start_year(y: str) -> int:
-    return int(y[:4])
 
 
 def fmt_year(s: int) -> str:
@@ -75,34 +82,55 @@ def main(reset: bool):
         Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     db = SessionLocal()
-    if db.scalar(select(Student.id).limit(1)):
+    if db.scalar(select(School.id).limit(1)):
         print("Data already present. Use --reset to reseed.")
         return
 
-    admin_pw, teacher_pw = ensure_env("ADMIN_PASSWORD"), ensure_env("TEACHER_PASSWORD")
-    db.add_all([
-        User(username="admin", password_hash=hash_password(admin_pw), role="admin", full_name="School Administrator"),
-        User(username="teacher", password_hash=hash_password(teacher_pw), role="teacher", full_name="Class Teacher"),
-    ])
+    pw = {k: ensure_env(k) for k in ("SUPERADMIN_PASSWORD", "ADMIN_PASSWORD", "TEACHER_PASSWORD",
+                                     "STUDENT_PASSWORD", "OWNER2_PASSWORD")}
 
-    # subjects
+    # ---- platform superadmin + empty second school ----
+    db.add(User(school_id=None, username="superadmin", password_hash=hash_password(pw["SUPERADMIN_PASSWORD"]),
+                role="superadmin", full_name="Platform Superadmin"))
+    school2 = School(name="Greenfield Academy")
+    db.add(school2)
+    db.flush()
+    db.add(User(school_id=school2.id, username="owner2", password_hash=hash_password(pw["OWNER2_PASSWORD"]),
+                role="admin", full_name="Greenfield Owner"))
+
+    # ---- demo school ----
+    school = School(
+        name="Sunrise Public School", founded="1998",
+        about="Sunrise Public School is a co-educational school from LKG to Class 10, nurturing curious, confident and responsible learners.",
+        mission="To deliver joyful, rigorous and inclusive education that prepares every child for the future.",
+        vision="A school where technology and teachers together unlock every student's potential.",
+        address="12 Education Avenue, Hyderabad, Telangana.", contact="office@school.example | +91 40 0000 0000")
+    db.add(school)
+    db.flush()
+    sid = school.id
+    db.add(User(school_id=sid, username="admin", password_hash=hash_password(pw["ADMIN_PASSWORD"]),
+                role="admin", full_name="School Owner"))
+
     subj = {}
     for g in GRADES:
         for n in subjects_for(g):
-            s = Subject(name=n, grade=g)
+            s = Subject(school_id=sid, name=n, grade=g)
             db.add(s)
             subj[(g, n)] = s
     db.flush()
+    for (g, n), s in subj.items():
+        for i, title in enumerate(CHAPTERS.get(n, [f"Unit {k}" for k in range(1, 5)]), 1):
+            db.add(Chapter(subject_id=s.id, number=i, title=title,
+                           description=f"{n} — chapter {i} for {'class ' + g if g.isdigit() else g}."))
 
-    # staff: one class teacher per grade (section A) + specialists
     first = ["Suresh", "Lakshmi", "Ramesh", "Padma", "Anil", "Sunita", "Vikram", "Deepa", "Manoj", "Rekha", "Prakash", "Swathi", "Harish", "Geeta"]
     staff_rows = []
     for i, g in enumerate(GRADES):
         subs = subjects_for(g)
-        gender = "Female" if i % 3 else "Male"
         staff_rows.append(Staff(
-            employee_id=f"EMP{100 + i}", name=f"{first[i % len(first)]} {LAST[(i * 5) % len(LAST)]}", gender=gender,
-            designation="Class Teacher", department="Early Years" if g in ("LKG", "UKG") else "Primary" if int(g) <= 5 else "Secondary",
+            school_id=sid, employee_id=f"EMP{100 + i}", name=f"{first[i % len(first)]} {LAST[(i * 5) % len(LAST)]}",
+            gender="Female" if i % 3 else "Male", designation="Class Teacher",
+            department="Early Years" if g in ("LKG", "UKG") else "Primary" if int(g) <= 5 else "Secondary",
             qualification="B.Ed, M.A." if i % 2 else "B.Ed, M.Sc.", experience_years=3 + (i * 7) % 18,
             subjects=", ".join(subs[:2]), class_teacher_of=f"{g}-A", phone=f"+91 98{random.randint(10000000, 99999999)}",
             email=f"emp{100 + i}@school.example", joined_on=date(2024 - (i % 9), 6, 10),
@@ -118,14 +146,18 @@ def main(reset: bool):
     ]
     for j, (n, d, dep, q, exp, subs, gen) in enumerate(specialists):
         staff_rows.append(Staff(
-            employee_id=f"EMP{200 + j}", name=n, gender=gen, designation=d, department=dep, qualification=q,
-            experience_years=exp, subjects=subs or None, class_teacher_of=None,
+            school_id=sid, employee_id=f"EMP{200 + j}", name=n, gender=gen, designation=d, department=dep,
+            qualification=q, experience_years=exp, subjects=subs or None, class_teacher_of=None,
             phone=f"+91 97{random.randint(10000000, 99999999)}", email=f"emp{200 + j}@school.example",
             joined_on=date(2024 - exp // 2, 6, 1), bio=f"{d} with {exp} years of experience."))
     db.add_all(staff_rows)
+    db.flush()
+    # teacher login linked to the class teacher of class 5
+    t = next(s for s in staff_rows if s.class_teacher_of == "5-A")
+    db.add(User(school_id=sid, username="teacher", password_hash=hash_password(pw["TEACHER_PASSWORD"]), role="staff",
+                full_name=t.name, permissions=",".join(TEACHER_DEFAULT), staff_id=t.id))
 
-    # students: 2 sections per grade, 6 per section; marks for current & previous year
-    cur_start = start_year(CURRENT_YEAR)
+    cur_start = int(CURRENT_YEAR[:4])
     adm = 1000
     students = []
     for g in GRADES:
@@ -136,7 +168,7 @@ def main(reset: bool):
                 name = f"{random.choice(MALE if gender == 'Male' else FEMALE)} {random.choice(LAST)}"
                 age = 3 if g == "LKG" else 4 if g == "UKG" else 5 + int(g)
                 st = Student(
-                    admission_no=f"ADM{adm}", name=name, gender=gender,
+                    school_id=sid, admission_no=f"ADM{adm}", name=name, gender=gender,
                     dob=date(cur_start - age, random.randint(1, 12), random.randint(1, 28)),
                     grade=g, section=sec, guardian_name=f"{random.choice(MALE)} {name.split()[1]}",
                     phone=f"+91 9{random.randint(100000000, 999999999)}", email=f"parent{adm}@example.com",
@@ -145,6 +177,9 @@ def main(reset: bool):
                 db.add(st)
                 students.append(st)
     db.flush()
+    demo = next(s for s in students if s.grade == "5" and s.section == "A")
+    db.add(User(school_id=sid, username="student", password_hash=hash_password(pw["STUDENT_PASSWORD"]),
+                role="student", full_name=demo.name, student_id=demo.id))
 
     for st in students:
         ability = random.gauss(68, 15)
@@ -160,7 +195,6 @@ def main(reset: bool):
                     p = max(18, min(99, base + i * random.uniform(-1, 3)))
                     db.add(Mark(student_id=st.id, subject_id=subj[(g, sname)].id, exam=exam,
                                 academic_year=year, score=round(mx * p / 100, 1), max_score=mx))
-        # fees
         total = fee_total(st.grade)
         db.add(Fee(student_id=st.id, academic_year=CURRENT_YEAR, total_amount=total))
         if pg:
@@ -182,8 +216,7 @@ def main(reset: bool):
         ("Independence Day", "Flag hoisting and cultural programme.", date(cur_start, 8, 15), "School Ground", "Celebration"),
         ("Book Fair", "A week-long fair to encourage reading.", today - timedelta(days=120), "Library", "Academic"),
     ]
-    db.add_all(Event(title=a, description=b, date=c, location=d, category=e) for a, b, c, d, e in events)
-
+    db.add_all(Event(school_id=sid, title=a, description=b, date=c, location=d, category=e) for a, b, c, d, e in events)
     gallery = [
         ("Sports Day Relay", "Sports", "Final relay of the inter-house meet."),
         ("Science Exhibition Models", "Academic", "Class 9 students with their solar model."),
@@ -194,9 +227,8 @@ def main(reset: bool):
         ("Art Competition", "Cultural", "Inter-class painting contest."),
         ("Green Campus Drive", "Campus", "Tree plantation by Class 6."),
     ]
-    db.add_all(GalleryItem(title=t, category=c, caption=cap, image_url=None,
-                           taken_on=today - timedelta(days=i * 17)) for i, (t, c, cap) in enumerate(gallery))
-
+    db.add_all(GalleryItem(school_id=sid, title=t_, category=c, caption=cap, taken_on=today - timedelta(days=i * 17))
+               for i, (t_, c, cap) in enumerate(gallery))
     goals = [
         ("Smart Classrooms in all grades", "Interactive displays and digital content for every class.", 2027, 45, "In Progress"),
         ("AI-assisted personalised learning", "Weak-area detection with tailored practice for each student.", 2026, 30, "In Progress"),
@@ -205,19 +237,10 @@ def main(reset: bool):
         ("100% digital parent communication", "Fees, attendance and progress on the parent app.", 2026, 75, "In Progress"),
         ("Inclusive learning centre", "Resource room and trained special educators.", 2029, 5, "Planned"),
     ]
-    db.add_all(Goal(title=a, description=b, target_year=c, progress=d, status=e) for a, b, c, d, e in goals)
-
-    db.add_all([
-        Setting(key="name", value="Sunrise Public School"),
-        Setting(key="about", value="Sunrise Public School is a co-educational school from LKG to Class 10, nurturing curious, confident and responsible learners."),
-        Setting(key="mission", value="Mission: to deliver joyful, rigorous and inclusive education that prepares every child for the future."),
-        Setting(key="vision", value="Vision: a school where technology and teachers together unlock every student's potential."),
-        Setting(key="address", value="Address: 12 Education Avenue, Hyderabad, Telangana."),
-        Setting(key="founded", value="1998"),
-        Setting(key="contact", value="office@school.example | +91 40 0000 0000"),
-    ])
+    db.add_all(Goal(school_id=sid, title=a, description=b, target_year=c, progress=d, status=e) for a, b, c, d, e in goals)
     db.commit()
-    print(f"Seeded {len(students)} students, {len(staff_rows)} staff. Logins: admin / teacher (passwords in backend/.env)")
+    print(f"Seeded {len(students)} students, {len(staff_rows)} staff in 'Sunrise Public School' + empty 'Greenfield Academy'.")
+    print("Logins: superadmin / admin / teacher / student / owner2  (passwords in backend/.env)")
 
 
 if __name__ == "__main__":

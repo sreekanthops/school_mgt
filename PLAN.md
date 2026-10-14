@@ -1,13 +1,16 @@
 # Roadmap: from this MVP to a production, future-ready platform
 
 ## Phase 0 — Done (this repo)
-Auth + roles, students, marks analytics, fees, staff, subjects, events/gallery, goals, about,
-dashboard, grounded chatbot. SQLite for local use.
+Multi-school platform (superadmin, school owners, staff with granular permissions, student logins),
+students, marks analytics, fees, staff pages with photos, subjects with chapters, events, gallery
+uploads, goals, about, users and access management, student photo approval flow, role- and
+school-scoped grounded chatbot. SQLite and local disk uploads for local use.
 
 ## Phase 1 — Production hardening (2–4 weeks)
 - PostgreSQL + Alembic migrations (replace SQLite and `create_all`)
-- Gallery image upload to object storage (validated type/size, virus scan, signed URLs)
-- Edit/delete UI for staff, subjects, events, goals; marks entry grid per class and test
+- Move photo/gallery uploads to object storage (virus scan, signed URLs)
+- Marks entry grid per class and test
+- Force password change on first login for generated temporary passwords
 - SSO via OpenID Connect/SAML, MFA for admins, refresh tokens in httpOnly cookies, persistent login lockout (Redis)
 - Audit log of every write (who changed marks/fees and when)
 - Containerise on `registry.redhat.io/ubi9/python-312-minimal` and a UBI nginx image, non-root, read-only FS

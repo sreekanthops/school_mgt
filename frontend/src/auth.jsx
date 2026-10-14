@@ -16,9 +16,22 @@ export function AuthProvider({ children }) {
     setSession(null);
     setS(null);
   }
-  return (
-    <Ctx.Provider value={{ session, isAdmin: session?.role === "admin", login, logout }}>
-      {children}
-    </Ctx.Provider>
-  );
+  async function refresh() {
+    const me = await api("/auth/me");
+    const next = { ...session, ...me };
+    setSession(next);
+    setS(next);
+  }
+  const perms = new Set(session?.permissions ?? []);
+  const value = {
+    session,
+    role: session?.role,
+    isSuper: session?.role === "superadmin",
+    isStudent: session?.role === "student",
+    can: (p) => perms.has(p),
+    login,
+    logout,
+    refresh,
+  };
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
