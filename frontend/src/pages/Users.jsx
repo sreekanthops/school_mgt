@@ -33,7 +33,8 @@ function UserForm({ user, perms, students, staff, onClose, onSaved }) {
         onSaved();
       } else {
         const body = { full_name: f.full_name, role, permissions: role === "staff" ? f.permissions : [] };
-        if (role !== "student") body.username = f.username;  // students log in with their student ID
+        // student, admin and linked-staff logins are generated from their ID; only unlinked staff need a name
+        if (role === "staff" && !f.staff_id) body.username = f.username;
         if (role === "student") body.student_id = Number(f.student_id) || null;
         if (role === "staff" && f.staff_id) body.staff_id = Number(f.staff_id);
         onSaved(await api("/users", { method: "POST", body }));
@@ -51,10 +52,6 @@ function UserForm({ user, perms, students, staff, onClose, onSaved }) {
       <form onSubmit={submit}>
         {err && <div className="error">{err}</div>}
         <div className="form-grid">
-          {!edit && role !== "student" && (
-            <div className="field"><label htmlFor="u-name">Username *</label>
-              <input id="u-name" value={f.username} onChange={(e) => set("username", e.target.value)} required pattern="[A-Za-z0-9_.\-]{3,50}" title="3-50 letters, digits, . _ -" /></div>
-          )}
           <div className="field"><label htmlFor="u-full">Full name *</label>
             <input id="u-full" value={f.full_name} onChange={(e) => set("full_name", e.target.value)} required minLength={2} /></div>
           {!edit && (
@@ -72,12 +69,17 @@ function UserForm({ user, perms, students, staff, onClose, onSaved }) {
               </select></div>
           )}
           {!edit && role === "staff" && (
-            <div className="field"><label htmlFor="u-stf">Link to staff profile</label>
+            <div className="field"><label htmlFor="u-stf">Staff profile (login = staff ID)</label>
               <select id="u-stf" value={f.staff_id} onChange={(e) => set("staff_id", e.target.value)}>
-                <option value="">None</option>
-                {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                <option value="">None (choose a username)</option>
+                {staff.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.employee_id})</option>)}
               </select></div>
           )}
+          {!edit && role === "staff" && !f.staff_id && (
+            <div className="field"><label htmlFor="u-name">Username *</label>
+              <input id="u-name" value={f.username} onChange={(e) => set("username", e.target.value)} required pattern="[A-Za-z0-9_.\-]{3,50}" title="3-50 letters, digits, . _ -" /></div>
+          )}
+          {!edit && role === "admin" && <p className="small muted" style={{ gridColumn: "1 / -1" }}>The owner/admin login ID is generated automatically.</p>}
         </div>
         {role === "staff" && (
           <>

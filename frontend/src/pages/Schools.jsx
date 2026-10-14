@@ -6,7 +6,6 @@ import { Async, Badge, Confirm, FormModal, PageHead, Secret, useLoad } from "../
 const fields = [
   { key: "name", label: "School name", required: true, full: true },
   { key: "owner_name", label: "Owner full name", required: true },
-  { key: "owner_username", label: "Owner username", required: true },
 ];
 
 export default function Schools() {

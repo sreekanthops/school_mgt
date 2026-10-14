@@ -16,7 +16,7 @@ from .config import CURRENT_YEAR, ENV_PATH
 from .db import Base, SessionLocal, engine
 from .models import (EXAMS, GRADES, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, School, Staff,
                      Student, Subject, User)
-from .deps import CLASS_CODE
+from .deps import make_code, staff_letter
 from .security import TEACHER_DEFAULT, hash_password
 
 random.seed(42)
@@ -90,14 +90,9 @@ def main(reset: bool):
     pw = {k: ensure_env(k) for k in ("SUPERADMIN_PASSWORD", "ADMIN_PASSWORD", "TEACHER_PASSWORD",
                                      "STUDENT_PASSWORD", "OWNER2_PASSWORD")}
 
-    # ---- platform superadmin + empty second school ----
+    # ---- platform superadmin ----
     db.add(User(school_id=None, username="superadmin", password_hash=hash_password(pw["SUPERADMIN_PASSWORD"]),
                 role="superadmin", full_name="Platform Superadmin"))
-    school2 = School(name="Greenfield Academy")
-    db.add(school2)
-    db.flush()
-    db.add(User(school_id=school2.id, username="owner2", password_hash=hash_password(pw["OWNER2_PASSWORD"]),
-                role="admin", full_name="Greenfield Owner"))
 
     # ---- demo school ----
     school = School(
@@ -109,8 +104,15 @@ def main(reset: bool):
     db.add(school)
     db.flush()
     sid = school.id
-    db.add(User(school_id=sid, username="admin", password_hash=hash_password(pw["ADMIN_PASSWORD"]),
+    db.add(User(school_id=sid, username=make_code(sid, "o", 1), password_hash=hash_password(pw["ADMIN_PASSWORD"]),
                 role="admin", full_name="School Owner"))
+
+    # ---- empty second school (shows tenant isolation); created after the demo school so ids are 1 and 2 ----
+    school2 = School(name="Greenfield Academy")
+    db.add(school2)
+    db.flush()
+    db.add(User(school_id=school2.id, username=make_code(school2.id, "o", 1), password_hash=hash_password(pw["OWNER2_PASSWORD"]),
+                role="admin", full_name="Greenfield Owner"))
 
     subj = {}
     for g in GRADES:
@@ -124,17 +126,24 @@ def main(reset: bool):
             db.add(Chapter(subject_id=s.id, number=i, title=title,
                            description=f"{n} — chapter {i} for {'class ' + g if g.isdigit() else g}."))
 
+    counters = {"t": 0, "p": 0}
+
+    def staff_id(designation: str) -> str:  # <school><year><t|p><nnn>, numbered in creation order
+        letter = staff_letter(designation)
+        counters[letter] += 1
+        return make_code(sid, letter, counters[letter])
+
     first = ["Suresh", "Lakshmi", "Ramesh", "Padma", "Anil", "Sunita", "Vikram", "Deepa", "Manoj", "Rekha", "Prakash", "Swathi", "Harish", "Geeta"]
     staff_rows = []
     for i, g in enumerate(GRADES):
         subs = subjects_for(g)
         staff_rows.append(Staff(
-            school_id=sid, employee_id=f"EMP{100 + i}", name=f"{first[i % len(first)]} {LAST[(i * 5) % len(LAST)]}",
+            school_id=sid, employee_id=staff_id("Class Teacher"), name=f"{first[i % len(first)]} {LAST[(i * 5) % len(LAST)]}",
             gender="Female" if i % 3 else "Male", designation="Class Teacher",
             department="Early Years" if g in ("LKG", "UKG") else "Primary" if int(g) <= 5 else "Secondary",
             qualification="B.Ed, M.A." if i % 2 else "B.Ed, M.Sc.", experience_years=3 + (i * 7) % 18,
             subjects=", ".join(subs[:2]), class_teacher_of=f"{g}-A", phone=f"+91 98{random.randint(10000000, 99999999)}",
-            email=f"emp{100 + i}@school.example", joined_on=date(2024 - (i % 9), 6, 10),
+            email=f"teacher{i + 1}@school.example", joined_on=date(2024 - (i % 9), 6, 10),
             bio=f"Dedicated educator guiding class {g} with a focus on conceptual clarity."))
     specialists = [
         ("Dr. Anitha Rao", "Principal", "Administration", "Ph.D., M.Ed.", 25, "", "Female"),
@@ -147,15 +156,15 @@ def main(reset: bool):
     ]
     for j, (n, d, dep, q, exp, subs, gen) in enumerate(specialists):
         staff_rows.append(Staff(
-            school_id=sid, employee_id=f"EMP{200 + j}", name=n, gender=gen, designation=d, department=dep,
+            school_id=sid, employee_id=staff_id(d), name=n, gender=gen, designation=d, department=dep,
             qualification=q, experience_years=exp, subjects=subs or None, class_teacher_of=None,
-            phone=f"+91 97{random.randint(10000000, 99999999)}", email=f"emp{200 + j}@school.example",
+            phone=f"+91 97{random.randint(10000000, 99999999)}", email=f"staff{j + 1}@school.example",
             joined_on=date(2024 - exp // 2, 6, 1), bio=f"{d} with {exp} years of experience."))
     db.add_all(staff_rows)
     db.flush()
     # teacher login linked to the class teacher of class 5
     t = next(s for s in staff_rows if s.class_teacher_of == "5-A")
-    db.add(User(school_id=sid, username="teacher", password_hash=hash_password(pw["TEACHER_PASSWORD"]), role="staff",
+    db.add(User(school_id=sid, username=t.employee_id, password_hash=hash_password(pw["TEACHER_PASSWORD"]), role="staff",
                 full_name=t.name, permissions=",".join(TEACHER_DEFAULT), staff_id=t.id))
 
     cur_start = int(CURRENT_YEAR[:4])
@@ -165,7 +174,7 @@ def main(reset: bool):
         for sec in ("A", "B"):
             for _ in range(6):
                 roll += 1
-                adm = f"{date.today().year}{CLASS_CODE[g]}{roll:03d}"  # student ID = login name
+                adm = make_code(sid, "s", roll, g)  # student ID = login name
                 gender = random.choice(["Male", "Female"])
                 name = f"{random.choice(MALE if gender == 'Male' else FEMALE)} {random.choice(LAST)}"
                 age = 3 if g == "LKG" else 4 if g == "UKG" else 5 + int(g)
@@ -245,7 +254,8 @@ def main(reset: bool):
     db.commit()
     print(f"Seeded {len(students)} students, {len(staff_rows)} staff in 'Sunrise Public School' + empty 'Greenfield Academy'.")
     demo = next(s for s in students if s.grade == "5" and s.section == "A")
-    print(f"Logins: superadmin / admin / teacher / owner2 / any student ID e.g. {demo.admission_no} "
+    print(f"Logins: superadmin, owner {make_code(sid, 'o', 1)}, teacher {t.employee_id}, "
+          f"student {demo.admission_no}, owner of school 2 {make_code(school2.id, 'o', 1)} "
           "(passwords in backend/.env)")
 
 

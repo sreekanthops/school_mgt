@@ -10,22 +10,40 @@ from sqlalchemy.orm import Session
 from .models import Chapter, Staff, Student, Subject, User
 from .security import perm_set
 
-# Student ID = YYYY + 2-digit class code + 3-digit roll number, e.g. 202609011 = 2026, class 9, roll 011.
-# LKG/UKG have no class number, so they get 90/91.
+# Every login ID is  <school id><YYYY><letter><number>  (the letter keeps school id and year unambiguous):
+#   s = student  <class 2 digits><roll 3 digits>   12026s09011 = school 1, 2026, class 9, roll 011
+#   t = teacher / staff  <3 digits>                12026t007
+#   p = principal        <3 digits>                12026p001
+#   o = owner (school admin) <3 digits>            12026o001
+# LKG/UKG have no class number, so they use 90/91. The ID is also the person's login name and never changes.
 CLASS_CODE = {"LKG": "90", "UKG": "91", **{str(i): f"{i:02d}" for i in range(1, 11)}}
 
 
-def next_student_code(db: Session, grade: str, year: Optional[int] = None) -> str:
-    """Next free student ID. Student IDs are login names, which are unique across the platform,
-    so the roll number is allocated against every school, not just the caller's."""
-    prefix = f"{year or date.today().year}{CLASS_CODE[grade]}"
+def code_prefix(school_id: int, letter: str, grade: Optional[str] = None, year: Optional[int] = None) -> str:
+    return f"{school_id}{year or date.today().year}{letter}{CLASS_CODE[grade] if grade else ''}"
+
+
+def make_code(school_id: int, letter: str, n: int, grade: Optional[str] = None, year: Optional[int] = None) -> str:
+    return f"{code_prefix(school_id, letter, grade, year)}{n:03d}"
+
+
+def next_code(db: Session, school_id: int, letter: str, grade: Optional[str] = None, year: Optional[int] = None) -> str:
+    """Next free ID with this prefix. Looks at logins, student IDs and staff IDs, and counts up from the
+    highest number in use (numbers run 001-999)."""
+    prefix = code_prefix(school_id, letter, grade, year)
     taken = list(db.scalars(select(User.username).where(User.username.like(f"{prefix}%"))))
     taken += db.scalars(select(Student.admission_no).where(Student.admission_no.like(f"{prefix}%")))
-    rolls = [int(c[len(prefix):]) for c in taken if len(c) == len(prefix) + 3 and c[len(prefix):].isdigit()]
-    nxt = max(rolls, default=0) + 1
+    taken += db.scalars(select(Staff.employee_id).where(Staff.employee_id.like(f"{prefix}%")))
+    nums = [int(c[len(prefix):]) for c in taken if len(c) == len(prefix) + 3 and c[len(prefix):].isdigit()]
+    nxt = max(nums, default=0) + 1
     if nxt > 999:
-        raise HTTPException(409, "No roll numbers left for this class and year")
-    return f"{prefix}{nxt:03d}"
+        raise HTTPException(409, "No numbers left for this ID series")
+    return make_code(school_id, letter, nxt, grade, year)
+
+
+def staff_letter(designation: str) -> str:
+    """Principal gets 'p'; every other staff member (including the vice principal) gets 't'."""
+    return "p" if designation.strip().lower() == "principal" else "t"
 
 
 def get_owned(db: Session, model: Type, obj_id: int, school_id: int):

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .. import analytics, storage
 from ..config import CURRENT_YEAR
 from ..db import get_db
-from ..deps import can_see_fees, can_see_student, get_owned, get_student, next_student_code
+from ..deps import can_see_fees, can_see_student, get_owned, get_student, next_code, staff_letter
 from ..models import EXAM_MAX, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, Staff, Student, Subject, User
 from ..schemas import FeeIn, MarkIn, PaymentIn, StaffIn, StudentIn
 from ..security import gen_password, hash_password, need, perm_set, school_user, staff_side
@@ -111,7 +111,7 @@ def add_student(data: StudentIn, user: User = Depends(need("students.manage")), 
     """Creates the student with an auto-generated ID and a login (ID + one-time temporary password)."""
     fields = data.model_dump(exclude={"admission_no"})
     for _ in range(3):  # retry if two requests grab the same roll number
-        code = next_student_code(db, data.grade)
+        code = next_code(db, user.school_id, "s", data.grade)
         s = Student(school_id=user.school_id, admission_no=code, **fields)
         db.add(s)
         db.flush()
@@ -369,26 +369,26 @@ def staff_detail(sid: int, user: User = Depends(school_user), db: Session = Depe
 
 @router.post("/staff", status_code=201)
 def add_staff(data: StaffIn, user: User = Depends(need("staff.manage")), db: Session = Depends(get_db)):
-    s = Staff(school_id=user.school_id, **data.model_dump())
-    db.add(s)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(409, "Employee ID already exists")
-    return _staff_out(s)
+    """The staff ID is generated: <school><year>t<nnn>, or ...p<nnn> for the principal."""
+    fields = data.model_dump(exclude={"employee_id"})
+    for _ in range(3):  # retry if two requests grab the same number
+        s = Staff(school_id=user.school_id, employee_id=next_code(db, user.school_id, staff_letter(data.designation)),
+                  **fields)
+        db.add(s)
+        try:
+            db.commit()
+            return _staff_out(s)
+        except IntegrityError:
+            db.rollback()
+    raise HTTPException(409, "Could not allocate a staff ID, please try again")
 
 
 @router.put("/staff/{sid}")
 def update_staff(sid: int, data: StaffIn, user: User = Depends(need("staff.manage")), db: Session = Depends(get_db)):
     s = get_owned(db, Staff, sid, user.school_id)
-    for k, v in data.model_dump().items():
+    for k, v in data.model_dump(exclude={"employee_id"}).items():  # the staff ID never changes
         setattr(s, k, v)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(409, "Employee ID already exists")
+    db.commit()
     return _staff_out(s)
 
 

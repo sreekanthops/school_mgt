@@ -37,11 +37,15 @@ def test_cannot_manage_other_schools_users(client, world):
 
 # ---------- superadmin ----------
 def test_superadmin_creates_school_and_owner_logs_in_to_empty_school(client, world):
+    from datetime import date
     h = login(client, "super")
-    r = client.post("/api/schools", headers=h, json={"name": "New Kids School", "owner_name": "New Owner", "owner_username": "newowner"})
+    r = client.post("/api/schools", headers=h, json={"name": "New Kids School", "owner_name": "New Owner"})
     assert r.status_code == 201
     temp = r.json()["owner"]["temp_password"]
-    oh = login(client, "newowner", temp)
+    # the owner login is generated: <school id><year>o001
+    owner_id = r.json()["owner"]["username"]
+    assert owner_id == f"{r.json()['school']['id']}{date.today().year}o001"
+    oh = login(client, owner_id, temp)
     assert client.get("/api/school", headers=oh).json()["name"] == "New Kids School"
     assert client.get("/api/dashboard", headers=oh).json()["counts"]["students"] == 0
     # owner can now rename their own school
@@ -52,7 +56,7 @@ def test_superadmin_endpoints_forbidden_to_others(client, world):
     for u in ("ownerA", "teacherA", "kid1"):
         h = login(client, u)
         assert client.get("/api/schools", headers=h).status_code == 403
-        assert client.post("/api/schools", headers=h, json={"name": "x", "owner_name": "yy", "owner_username": "zzz"}).status_code == 403
+        assert client.post("/api/schools", headers=h, json={"name": "x", "owner_name": "yy"}).status_code == 403
 
 
 def test_superadmin_cannot_use_school_data_endpoints(client, world):
@@ -234,7 +238,7 @@ def test_subject_and_chapter_crud(client, world):
 
 def test_staff_crud_and_detail(client, world):
     h = login(client, "ownerA")
-    body = {"employee_id": "E9", "name": "New Teacher", "gender": "Female", "designation": "Teacher", "department": "Primary",
+    body = {"name": "New Teacher", "gender": "Female", "designation": "Teacher", "department": "Primary",
             "qualification": "M.Ed", "experience_years": 3, "subjects": "Maths", "phone": "9999999990",
             "email": "n@x.com", "joined_on": "2024-06-01"}
     sid = client.post("/api/staff", headers=h, json=body).json()["id"]
@@ -242,6 +246,29 @@ def test_staff_crud_and_detail(client, world):
     d = client.get(f"/api/staff/{sid}", headers=h).json()
     assert d["qualification"] == "M.Ed" and d["teaches"][0]["name"] == "Maths" and d["can"]["edit"] is True
     assert client.delete(f"/api/staff/{sid}", headers=h).status_code == 204
+
+
+def test_staff_gets_generated_id_and_login_name(client, world):
+    from datetime import date
+    y, a = date.today().year, world["a"]
+    h = login(client, "ownerA")
+    body = {"employee_id": "HACK", "name": "New Teacher", "gender": "Female", "designation": "Teacher", "department": "Primary",
+            "qualification": "M.Ed", "experience_years": 3, "phone": "9999999990", "email": "n@x.com", "joined_on": "2024-06-01"}
+    t1 = client.post("/api/staff", headers=h, json=body)
+    t2 = client.post("/api/staff", headers=h, json={**body, "name": "Second Teacher"})
+    p = client.post("/api/staff", headers=h, json={**body, "name": "Head Person", "designation": "Principal"})
+    # client-supplied employee_id is ignored; ids are school+year+letter+number
+    assert t1.json()["employee_id"] == f"{a}{y}t001"
+    assert t2.json()["employee_id"] == f"{a}{y}t002"
+    assert p.json()["employee_id"] == f"{a}{y}p001"
+    # the employee_id cannot be changed on update
+    u = client.put(f"/api/staff/{t1.json()['id']}", headers=h, json={**body, "employee_id": "X1", "name": "Renamed"})
+    assert u.json()["employee_id"] == f"{a}{y}t001"
+    # a staff login linked to a profile uses the staff ID as login name
+    r = client.post("/api/users", headers=h, json={"username": "ignored", "full_name": "New Teacher", "role": "staff",
+                                                    "staff_id": t1.json()["id"], "permissions": ["students.view"]})
+    assert r.status_code == 201 and r.json()["username"] == f"{a}{y}t001"
+    login(client, f"{a}{y}t001", r.json()["temp_password"])
 
 
 def test_staff_list_is_short_view(client, world):
@@ -290,43 +317,41 @@ def _new_student(grade="9", name="Ravi Teja"):
 def test_new_student_gets_id_and_login(client, world):
     from datetime import date
     oh = login(client, "ownerA")
-    y = date.today().year
+    y, a = date.today().year, world["a"]
     r1 = client.post("/api/students", headers=oh, json=_new_student("9"))
     r2 = client.post("/api/students", headers=oh, json=_new_student("9", "Sita Devi"))
     assert r1.status_code == 201 and r2.status_code == 201
-    # year + 2-digit class + 3-digit roll: 9 digits, roll increments
-    assert r1.json()["admission_no"] == f"{y}09001"
-    assert r2.json()["admission_no"] == f"{y}09002"
-    assert r1.json()["login"]["username"] == f"{y}09001"
+    # school id + year + 's' + 2-digit class + 3-digit roll; roll increments
+    assert r1.json()["admission_no"] == f"{a}{y}s09001"
+    assert r2.json()["admission_no"] == f"{a}{y}s09002"
+    assert r1.json()["login"]["username"] == f"{a}{y}s09001"
     # the new student can sign in with ID + the one-time password, and sees only themself
-    sh = login(client, f"{y}09001", r1.json()["login"]["temp_password"])
+    sh = login(client, f"{a}{y}s09001", r1.json()["login"]["temp_password"])
     assert client.get("/api/auth/me", headers=sh).json()["role"] == "student"
     assert client.get(f"/api/students/{r2.json()['id']}", headers=sh).status_code == 403
     # LKG / UKG / class 10 codes
-    assert client.post("/api/students", headers=oh, json=_new_student("LKG")).json()["admission_no"] == f"{y}90001"
-    assert client.post("/api/students", headers=oh, json=_new_student("10")).json()["admission_no"] == f"{y}10001"
+    assert client.post("/api/students", headers=oh, json=_new_student("LKG")).json()["admission_no"] == f"{a}{y}s90001"
+    assert client.post("/api/students", headers=oh, json=_new_student("UKG")).json()["admission_no"] == f"{a}{y}s91001"
+    assert client.post("/api/students", headers=oh, json=_new_student("10")).json()["admission_no"] == f"{a}{y}s10001"
 
 
 def test_student_id_is_unique_across_schools_and_not_editable(client, world):
     from datetime import date
     y = date.today().year
     a = client.post("/api/students", headers=login(client, "ownerA"), json=_new_student("5"))
-    # a second school's student must not collide with the first school's login name
-    from app.db import SessionLocal
-    from app.models import User
-    with SessionLocal() as db:
-        ob = db.query(User).filter_by(username="ownerB").one()
-        assert ob.school_id == world["b"]
     b = client.post("/api/students", headers=login(client, "ownerB"), json=_new_student("5", "B Kid"))
-    assert a.json()["admission_no"] == f"{y}05001"
-    assert b.json()["admission_no"] == f"{y}05002"
+    # the school id prefix keeps the two schools' IDs (and login names) apart
+    assert a.json()["admission_no"] == f"{world['a']}{y}s05001"
+    assert b.json()["admission_no"] == f"{world['b']}{y}s05001"
+    assert a.json()["admission_no"] != b.json()["admission_no"]
     # sending an admission_no on create or update is ignored
     oh = login(client, "ownerA")
     body = {**_new_student("5"), "admission_no": "HACK1"}
     c = client.post("/api/students", headers=oh, json=body)
-    assert c.json()["admission_no"] == f"{y}05003"
+    code = f"{world['a']}{y}s05002"
+    assert c.json()["admission_no"] == code
     u = client.put(f"/api/students/{c.json()['id']}", headers=oh, json={**body, "name": "Renamed Kid"})
-    assert u.json()["admission_no"] == f"{y}05003" and u.json()["name"] == "Renamed Kid"
+    assert u.json()["admission_no"] == code and u.json()["name"] == "Renamed Kid"
 
 
 def test_no_auth_gets_401(client, world):

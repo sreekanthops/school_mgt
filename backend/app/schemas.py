@@ -33,11 +33,10 @@ class SchoolIn(BaseModel):
 class NewSchoolIn(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     owner_name: str = Field(min_length=2, max_length=100)
-    owner_username: str = Field(min_length=3, max_length=50, pattern=r"^[A-Za-z0-9_.-]+$")
 
 
 class UserIn(BaseModel):
-    # ignored for students: their login name is always their student ID
+    # only for staff who are not linked to a staff profile; every other login name is generated from the ID scheme
     username: Optional[str] = Field(default=None, min_length=3, max_length=50, pattern=r"^[A-Za-z0-9_.-]+$")
     full_name: str = Field(min_length=2, max_length=100)
     role: str = Field(pattern=r"^(admin|staff|student)$")
@@ -99,7 +98,7 @@ class FeeIn(BaseModel):
 
 
 class StaffIn(BaseModel):
-    employee_id: str = Field(min_length=1, max_length=20)
+    employee_id: Optional[str] = Field(default=None, max_length=20)  # ignored: the staff ID is generated
     name: str = Field(min_length=2, max_length=100)
     gender: str = Field(pattern=r"^(Male|Female|Other)$")
     designation: str = Field(min_length=2, max_length=80)

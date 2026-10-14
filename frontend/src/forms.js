@@ -16,7 +16,6 @@ export const studentFields = [
 ];
 
 export const staffFields = [
-  { key: "employee_id", label: "Employee ID", required: true },
   { key: "name", label: "Full name", required: true },
   { key: "gender", label: "Gender", type: "select", options: ["Male", "Female", "Other"], default: "Female" },
   { key: "designation", label: "Designation", required: true },

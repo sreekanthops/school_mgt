@@ -41,7 +41,7 @@ export default function StaffDetail() {
             <div className="card">
               <h3 style={{ marginTop: 0 }}>Details</h3>
               <dl className="kv">
-                <dt>Employee ID</dt><dd>{s.employee_id}</dd>
+                <dt>Staff ID</dt><dd>{s.employee_id}</dd>
                 <dt>Gender</dt><dd>{s.gender}</dd>
                 <dt>Qualification</dt><dd>{s.qualification}</dd>
                 <dt>Joined</dt><dd>{s.joined_on}</dd>

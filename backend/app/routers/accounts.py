@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from .. import storage
 from ..db import get_db
+from ..deps import make_code, next_code
 from ..models import School, Staff, Student, User
 from ..schemas import LoginIn, NewSchoolIn, PasswordChangeIn, SchoolIn, UserIn, UserUpdateIn
 from ..security import (ALL_PERMS, PERMISSIONS, create_token, current_user, gen_password, hash_password,
@@ -101,13 +102,11 @@ def list_schools(_: User = Depends(superadmin_only), db: Session = Depends(get_d
 
 @router.post("/schools", status_code=201)
 def create_school(data: NewSchoolIn, sa: User = Depends(superadmin_only), db: Session = Depends(get_db)):
-    if db.scalar(select(User.id).where(User.username == data.owner_username)):
-        raise HTTPException(409, "Username already exists")
     school = School(name=data.name)
     db.add(school)
     db.flush()
     pw = gen_password()
-    owner = User(school_id=school.id, username=data.owner_username, password_hash=hash_password(pw),
+    owner = User(school_id=school.id, username=make_code(school.id, "o", 1), password_hash=hash_password(pw),
                  role="admin", full_name=data.owner_name)
     db.add(owner)
     db.commit()
@@ -177,19 +176,23 @@ def create_user(data: UserIn, actor: User = Depends(need("users.manage")), db: S
     perms = _check_perms(actor, data.permissions) if data.role == "staff" else None
     student_id = staff_id = None
     username = data.username
+    if data.role == "admin":
+        username = next_code(db, actor.school_id, "o")  # owner IDs: <school><year>o<nnn>
     if data.role == "student":
         st = db.get(Student, data.student_id) if data.student_id else None
         if not st or st.school_id != actor.school_id:
             raise HTTPException(422, "Choose a student from this school")
         student_id = st.id
         username = st.admission_no  # students always sign in with their student ID
-    elif not username:
-        raise HTTPException(422, "Username is required")
     if data.staff_id:
         sf = db.get(Staff, data.staff_id)
         if not sf or sf.school_id != actor.school_id:
             raise HTTPException(422, "Choose a staff member from this school")
         staff_id = sf.id
+        if data.role == "staff":
+            username = sf.employee_id  # staff sign in with their staff ID
+    if not username:
+        raise HTTPException(422, "Username is required for staff without a staff profile")
     pw = gen_password()
     u = User(school_id=actor.school_id, username=username, password_hash=hash_password(pw), role=data.role,
              full_name=data.full_name, permissions=perms, student_id=student_id, staff_id=staff_id)

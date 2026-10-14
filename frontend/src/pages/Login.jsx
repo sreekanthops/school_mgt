@@ -43,7 +43,7 @@ export default function Login() {
           <div className="muted" style={{ marginBottom: 20 }}>Sign in to continue</div>
           {err && <div className="error">{err}</div>}
           <div className="field" style={{ marginBottom: 12 }}>
-            <label htmlFor="u">Username or Student ID</label>
+            <label htmlFor="u">Login ID</label>
             <input id="u" value={u} onChange={(e) => setU(e.target.value)} autoComplete="username" required autoFocus />
           </div>
           <div className="field" style={{ marginBottom: 18 }}>
