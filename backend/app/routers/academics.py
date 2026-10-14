@@ -237,3 +237,13 @@ def delete_goal(gid: int, user: User = Depends(need("content.manage")), db: Sess
 @router.post("/chat")
 def chat(data: ChatIn, user: User = Depends(school_user), db: Session = Depends(get_db)):
     return chatbot.ask(db, user, data.question)
+
+
+@router.get("/chat/history")
+def chat_history(user: User = Depends(school_user), db: Session = Depends(get_db)):
+    return {"messages": chatbot.history(db, user), "suggestions": chatbot.suggestions_for(user)}
+
+
+@router.delete("/chat/history", status_code=204)
+def chat_clear(user: User = Depends(school_user), db: Session = Depends(get_db)):
+    chatbot.clear_history(db, user)

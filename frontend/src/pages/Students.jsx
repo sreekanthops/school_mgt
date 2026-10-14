@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Search } from "lucide-react";
 import { api, GRADES, gradeLabel, inr } from "../api.js";
 import { useAuth } from "../auth.jsx";
@@ -10,7 +10,8 @@ export default function Students() {
   const nav = useNavigate();
   const { can } = useAuth();
   const [q, setQ] = useState("");
-  const [grade, setGrade] = useState("");
+  const [search] = useSearchParams();
+  const [grade, setGrade] = useState(GRADES.includes(search.get("grade")) ? search.get("grade") : "");
   const [section, setSection] = useState("");
   const [page, setPage] = useState(1);
   const [adding, setAdding] = useState(false);

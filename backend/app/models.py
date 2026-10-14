@@ -1,7 +1,7 @@
 import datetime as dt
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -170,3 +170,33 @@ class Goal(Base):
     target_year: Mapped[int] = mapped_column(Integer)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(20), default="Planned")
+
+
+def _utcnow() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)  # naive UTC; the API appends "Z"
+
+
+class AssistantMessage(Base):
+    """One line of a user's private conversation with the school assistant (kept until they clear it)."""
+    __tablename__ = "assistant_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    who: Mapped[str] = mapped_column(String(3))  # me | bot
+    text: Mapped[str] = mapped_column(Text)
+    extra: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # {"cards": [...], "actions": [...]}
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class DirectMessage(Base):
+    """Person-to-person message inside one school. Each side can clear their own view independently."""
+    __tablename__ = "direct_messages"
+    __table_args__ = (Index("ix_dm_recipient_unread", "recipient_id", "read"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
+    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    recipient_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    body: Mapped[str] = mapped_column(String(1000))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+    read: Mapped[bool] = mapped_column(Boolean, default=False)
+    hidden_sender: Mapped[bool] = mapped_column(Boolean, default=False)
+    hidden_recipient: Mapped[bool] = mapped_column(Boolean, default=False)

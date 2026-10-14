@@ -161,3 +161,15 @@ class GoalIn(BaseModel):
 
 class ChatIn(BaseModel):
     question: str = Field(min_length=1, max_length=500)
+
+
+class MessageIn(BaseModel):
+    body: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("body")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("message is empty")
+        return v

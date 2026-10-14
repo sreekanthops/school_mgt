@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from .config import CORS_ORIGINS
 from .db import Base, engine
-from .routers import academics, accounts, people
+from .routers import academics, accounts, messages, people
 
 logging.basicConfig(level=logging.INFO, format='{"level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}')
 log = logging.getLogger("school")
@@ -38,6 +38,7 @@ async def unhandled(_: Request, exc: Exception):
 app.include_router(accounts.router)
 app.include_router(people.router)
 app.include_router(academics.router)
+app.include_router(messages.router)
 
 
 @app.get("/api/health")

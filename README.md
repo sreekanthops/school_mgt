@@ -68,7 +68,14 @@ Edit controls (add / edit / delete) appear only where the user holds the matchin
 | About | Per-school profile, editable by owners |
 | Users & Access | Create logins, tick permissions, reset passwords, disable |
 | Photo approvals | Approve / reject student photo changes |
-| Chatbot | Floating assistant answering from live database facts, scoped to the user's school and role |
+| Assistant | Floating chat with stat cards, performance bars and action buttons (open profile, marks, fees, message the person). History is saved per user until they clear it |
+| Messages | Private person-to-person chat inside a school (owner, staff, students). Unread badge, history kept until cleared (clearing only affects your own view) |
+
+## Messaging rules
+
+Owners and staff can message anyone in their school. Students can message staff and the owner, never
+other students. Nothing crosses schools. Clearing a chat hides it for you only; the other person keeps
+their copy. Message text is stored as plain text and rendered escaped.
 
 ## Chatbot design
 

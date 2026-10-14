@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Bar, BarChart, CartesianGrid, Legend, Line, LineChart, PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar,
   RadarChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -19,7 +19,8 @@ export default function StudentDetail({ me = false }) {
   const id = me ? session.student_id : params.id;
   const nav = useNavigate();
   const [year, setYear] = useState(null);
-  const [view, setView] = useState("overview");
+  const [search] = useSearchParams();
+  const [view, setView] = useState(["overview", "marks", "fees"].includes(search.get("tab")) ? search.get("tab") : "overview");
   const [tick, setTick] = useState(0);
   const [modal, setModal] = useState(null);
   const refresh = () => setTick((t) => t + 1);

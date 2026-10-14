@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import {
   BookOpen, Building2, CalendarDays, GraduationCap, Images, Info, KeyRound, LayoutDashboard, LogOut, Menu,
-  ShieldCheck, Target, UserCircle, Users, Wallet, Camera, GraduationCap as Logo,
+  MessagesSquare, ShieldCheck, Target, UserCircle, Users, Wallet, Camera, GraduationCap as Logo,
 } from "lucide-react";
 import { api } from "./api.js";
 import { useAuth } from "./auth.jsx";
@@ -26,6 +26,7 @@ const UsersPage = lazy(() => import("./pages/Users.jsx"));
 const Approvals = lazy(() => import("./pages/Approvals.jsx"));
 const Schools = lazy(() => import("./pages/Schools.jsx"));
 const Account = lazy(() => import("./pages/Account.jsx"));
+const Messages = lazy(() => import("./pages/Messages.jsx"));
 
 /** [path, label, icon, visible(auth) , group] */
 const NAV = [
@@ -35,6 +36,7 @@ const NAV = [
   ["/staff", "Staff", Users, (a) => !a.isSuper, "School"],
   ["/subjects", "Subjects", BookOpen, (a) => !a.isSuper, "School"],
   ["/fees", "Fees", Wallet, (a) => a.can("fees.view") || a.can("fees.manage"), "School"],
+  ["/messages", "Messages", MessagesSquare, (a) => !a.isSuper, "Campus"],
   ["/events", "Events", CalendarDays, (a) => !a.isSuper, "Campus"],
   ["/gallery", "Gallery", Images, (a) => !a.isSuper, "Campus"],
   ["/goals", "Future Goals", Target, (a) => !a.isSuper, "Campus"],
@@ -50,11 +52,19 @@ function Shell() {
   const { session, logout, isStudent, isSuper } = auth;
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(0);
+  const [unread, setUnread] = useState(0);
   const loc = useLocation();
   useEffect(() => setOpen(false), [loc.pathname]);
   useEffect(() => {
     if (auth.can("photos.approve")) api("/photo-requests").then((r) => setPending(r.length)).catch(() => {});
   }, [loc.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!session || isSuper) return undefined;
+    const load = () => api("/messages/unread").then((r) => setUnread(r.count)).catch(() => {});
+    load();
+    const t = setInterval(load, 15000);
+    return () => clearInterval(t);
+  }, [session, isSuper, loc.pathname]);
   if (!session) return <Navigate to="/login" replace />;
 
   const items = NAV.filter((n) => n[3](auth));
@@ -74,6 +84,7 @@ function Shell() {
                 <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => (isActive ? "active" : "")}>
                   <Icon size={18} /> {label}
                   {to === "/approvals" && pending > 0 && <span className="count">{pending}</span>}
+                  {to === "/messages" && unread > 0 && <span className="count">{unread}</span>}
                 </NavLink>
               ))}
             </div>
@@ -119,6 +130,7 @@ export default function App() {
         <Route path="subjects/:id" element={<Guard ok={!a.isSuper}><SubjectDetail /></Guard>} />
         <Route path="staff" element={<Guard ok={!a.isSuper}><Staff /></Guard>} />
         <Route path="staff/:id" element={<Guard ok={!a.isSuper}><StaffDetail /></Guard>} />
+        <Route path="messages" element={<Guard ok={!a.isSuper}><Messages /></Guard>} />
         <Route path="events" element={<Guard ok={!a.isSuper}><Events /></Guard>} />
         <Route path="gallery" element={<Guard ok={!a.isSuper}><Gallery /></Guard>} />
         <Route path="goals" element={<Guard ok={!a.isSuper}><Goals /></Guard>} />

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { BookOpen, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, gradeLabel } from "../api.js";
 import { Async, Badge, Confirm, FormModal, PageHead, useLoad } from "../components/ui.jsx";
@@ -8,7 +8,8 @@ const nameField = [{ key: "name", label: "Subject name", required: true, full: t
 
 export default function Subjects() {
   const [tick, setTick] = useState(0);
-  const [grade, setGrade] = useState("1");
+  const [search] = useSearchParams();
+  const [grade, setGrade] = useState(search.get("grade") || "1");
   const [dlg, setDlg] = useState(null);
   const state = useLoad(() => api("/subjects"), [tick]);
   const reload = () => setTick((t) => t + 1);

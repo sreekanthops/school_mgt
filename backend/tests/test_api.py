@@ -343,3 +343,91 @@ def test_fee_register_permission_and_scope(client, world):
     assert client.get("/api/fees?status=Paid", headers=login(client, "ownerA")).json()["items"] == []
     b = client.get("/api/fees", headers=login(client, "ownerB")).json()
     assert [i["name"] for i in b["items"]] == ["Other School Kid"] and b["summary"]["total"] == 0
+
+
+# ---------- assistant: structured replies + persistent history ----------
+def test_assistant_returns_stats_bars_and_buttons(client, world):
+    h = login(client, "ownerA")
+    r = client.post("/api/chat", headers=h, json={"question": "Tell me about Asha Rao"}).json()
+    assert "Asha Rao" in r["answer"] and r["stats"] and r["bars"]
+    labels = [a["label"] for a in r["actions"]]
+    assert "Open profile" in labels and "Marks & performance" in labels
+    assert all(a["to"].startswith("/") for a in r["actions"])  # in-app routes only
+    assert any(a["to"].startswith("/messages?to=") for a in r["actions"])  # Asha has a login
+    t = client.post("/api/chat", headers=h, json={"question": "Who are the top performers?"}).json()
+    assert t["bars"] and any(a["to"].startswith("/students/") for a in t["actions"])
+
+
+def test_assistant_history_persists_clears_and_is_private(client, world):
+    oh, th = login(client, "ownerA"), login(client, "teacherA")
+    client.post("/api/chat", headers=oh, json={"question": "How many students are in class 5?"})
+    h = client.get("/api/chat/history", headers=oh).json()["messages"]
+    assert [m["who"] for m in h] == ["me", "bot"] and h[1]["stats"]
+    assert client.get("/api/chat/history", headers=th).json()["messages"] == []  # not shared
+    assert client.delete("/api/chat/history", headers=th).status_code == 204
+    assert len(client.get("/api/chat/history", headers=oh).json()["messages"]) == 2  # only my own cleared
+    assert client.delete("/api/chat/history", headers=oh).status_code == 204
+    assert client.get("/api/chat/history", headers=oh).json()["messages"] == []
+
+
+def test_assistant_student_gets_no_message_button_for_students_or_fee_stats_of_others(client, world):
+    h = login(client, "kid1")
+    r = client.post("/api/chat", headers=h, json={"question": "How are my marks?"}).json()
+    assert all(not a["to"].startswith("/messages") for a in r["actions"])
+    assert r["actions"][0]["to"].startswith("/me")
+    other = client.post("/api/chat", headers=h, json={"question": "fee of Bala Rao"}).json()
+    assert "don't have access" in other["answer"] and not other["stats"] and not other["actions"]
+
+
+# ---------- direct messages ----------
+def _uid(client, h):
+    return client.get("/api/auth/me", headers=h).json()["id"]
+
+
+def test_direct_messages_flow_and_clear_is_per_side(client, world):
+    oh, th = login(client, "ownerA"), login(client, "teacherA")
+    tid = _uid(client, th)
+    assert client.post(f"/api/messages/with/{tid}", headers=oh, json={"body": "Please share the Class 5 results"}).status_code == 201
+    assert client.get("/api/messages/unread", headers=th).json()["count"] == 1
+    th_threads = client.get("/api/messages/threads", headers=th).json()
+    assert th_threads[0]["unread"] == 1 and th_threads[0]["name"] == "Owner A"
+    oid = th_threads[0]["id"]
+    conv = client.get(f"/api/messages/with/{oid}", headers=th).json()
+    assert conv["messages"][0]["body"].startswith("Please share") and conv["messages"][0]["mine"] is False
+    assert client.get("/api/messages/unread", headers=th).json()["count"] == 0  # opening marks read
+    client.post(f"/api/messages/with/{oid}", headers=th, json={"body": "Sure, sending now"})
+    # teacher clears: owner still sees everything, teacher sees nothing
+    assert client.delete(f"/api/messages/with/{oid}", headers=th).status_code == 204
+    assert client.get(f"/api/messages/with/{oid}", headers=th).json()["messages"] == []
+    assert len(client.get(f"/api/messages/with/{tid}", headers=oh).json()["messages"]) == 2
+    # a new message after clearing shows up again for the teacher
+    client.post(f"/api/messages/with/{tid}", headers=oh, json={"body": "Thanks"})
+    assert [m["body"] for m in client.get(f"/api/messages/with/{oid}", headers=th).json()["messages"]] == ["Thanks"]
+
+
+def test_direct_message_rules(client, world):
+    oh, kh, th = login(client, "ownerA"), login(client, "kid1"), login(client, "teacherA")
+    bh = login(client, "ownerB")
+    tid, oid, bid, kid = _uid(client, th), _uid(client, oh), _uid(client, bh), _uid(client, kh)
+    # students can write to staff and the owner, not to other students or themselves
+    assert client.post(f"/api/messages/with/{tid}", headers=kh, json={"body": "Sir, a doubt"}).status_code == 201
+    assert client.post(f"/api/messages/with/{oid}", headers=kh, json={"body": "Hello"}).status_code == 201
+    assert client.post(f"/api/messages/with/{kid}", headers=kh, json={"body": "me"}).status_code == 404
+    names = {c["name"] for c in client.get("/api/messages/contacts", headers=kh).json()}
+    assert "Teacher A" in names and "Asha Rao" not in names
+    # staff can write to a student
+    assert client.post(f"/api/messages/with/{kid}", headers=th, json={"body": "Come see me"}).status_code == 201
+    # never across schools, never to the superadmin, never to a missing user
+    assert client.post(f"/api/messages/with/{bid}", headers=oh, json={"body": "x"}).status_code == 404
+    assert client.get(f"/api/messages/with/{bid}", headers=oh).status_code == 404
+    assert client.post("/api/messages/with/99999", headers=oh, json={"body": "x"}).status_code == 404
+    # validation
+    assert client.post(f"/api/messages/with/{tid}", headers=oh, json={"body": "   "}).status_code == 422
+    assert client.post(f"/api/messages/with/{tid}", headers=oh, json={"body": "a" * 1001}).status_code == 422
+    # a third person cannot read someone else's conversation
+    assert all(m["body"] != "Sir, a doubt" for m in client.get(f"/api/messages/with/{kid}", headers=oh).json()["messages"])
+    # unauthenticated
+    assert client.get("/api/messages/threads").status_code == 401
+    # message text is stored and returned as plain text (the UI renders it escaped)
+    client.post(f"/api/messages/with/{tid}", headers=oh, json={"body": "<script>alert(1)</script>"})
+    assert client.get(f"/api/messages/with/{oid}", headers=th).json()["messages"][-1]["body"] == "<script>alert(1)</script>"
