@@ -32,7 +32,8 @@ function UserForm({ user, perms, students, staff, onClose, onSaved }) {
         await api(`/users/${user.id}`, { method: "PUT", body });
         onSaved();
       } else {
-        const body = { username: f.username, full_name: f.full_name, role, permissions: role === "staff" ? f.permissions : [] };
+        const body = { full_name: f.full_name, role, permissions: role === "staff" ? f.permissions : [] };
+        if (role !== "student") body.username = f.username;  // students log in with their student ID
         if (role === "student") body.student_id = Number(f.student_id) || null;
         if (role === "staff" && f.staff_id) body.staff_id = Number(f.staff_id);
         onSaved(await api("/users", { method: "POST", body }));
@@ -50,7 +51,7 @@ function UserForm({ user, perms, students, staff, onClose, onSaved }) {
       <form onSubmit={submit}>
         {err && <div className="error">{err}</div>}
         <div className="form-grid">
-          {!edit && (
+          {!edit && role !== "student" && (
             <div className="field"><label htmlFor="u-name">Username *</label>
               <input id="u-name" value={f.username} onChange={(e) => set("username", e.target.value)} required pattern="[A-Za-z0-9_.\-]{3,50}" title="3-50 letters, digits, . _ -" /></div>
           )}
@@ -64,7 +65,7 @@ function UserForm({ user, perms, students, staff, onClose, onSaved }) {
               </select></div>
           )}
           {!edit && role === "student" && (
-            <div className="field"><label htmlFor="u-stu">Student *</label>
+            <div className="field"><label htmlFor="u-stu">Student (login = student ID) *</label>
               <select id="u-stu" value={f.student_id} onChange={(e) => set("student_id", e.target.value)} required>
                 <option value="">Select student…</option>
                 {students.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.admission_no})</option>)}

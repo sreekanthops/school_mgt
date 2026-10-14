@@ -4,7 +4,7 @@ import { Plus, Search } from "lucide-react";
 import { api, GRADES, gradeLabel, inr } from "../api.js";
 import { useAuth } from "../auth.jsx";
 import { SECTIONS, studentFields } from "../forms.js";
-import { Async, Badge, FormModal, PageHead, Photo, tone, useLoad } from "../components/ui.jsx";
+import { Async, Badge, FormModal, PageHead, Photo, Secret, tone, useLoad } from "../components/ui.jsx";
 
 export default function Students() {
   const nav = useNavigate();
@@ -14,6 +14,7 @@ export default function Students() {
   const [section, setSection] = useState("");
   const [page, setPage] = useState(1);
   const [adding, setAdding] = useState(false);
+  const [secret, setSecret] = useState(null);
   const [tick, setTick] = useState(0);
   const params = new URLSearchParams({ page, page_size: 12 });
   if (q) params.set("q", q);
@@ -28,10 +29,15 @@ export default function Students() {
       </PageHead>
       {adding && (
         <FormModal title="Add student" fields={studentFields} onClose={() => setAdding(false)}
-          onSubmit={async (b) => { await api("/students", { method: "POST", body: b }); setTick((t) => t + 1); }} />
+          onSubmit={async (b) => {
+            const r = await api("/students", { method: "POST", body: b });
+            setSecret({ title: `${r.name} added`, username: r.login.username, password: r.login.temp_password, idLabel: "Student ID (login)" });
+            setTick((t) => t + 1);
+          }} />
       )}
+      {secret && <Secret {...secret} onClose={() => setSecret(null)} />}
       <div className="toolbar">
-        <div className="search"><Search size={16} /><input placeholder="Search name or admission no." value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></div>
+        <div className="search"><Search size={16} /><input placeholder="Search name or student ID" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></div>
         <select value={grade} onChange={(e) => { setGrade(e.target.value); setPage(1); }}>
           <option value="">All classes</option>
           {GRADES.map((g) => <option key={g} value={g}>{gradeLabel(g)}</option>)}

@@ -35,7 +35,7 @@ export default function StudentDetail({ me = false }) {
         return (
           <>
             {!me && <Link to="/students" className="backlink"><ArrowLeft size={14} /> All students</Link>}
-            <PageHead title={me ? "My Profile" : s.name} sub={`${gradeLabel(s.grade)}-${s.section} · Admission ${s.admission_no}`}>
+            <PageHead title={me ? "My Profile" : s.name} sub={`${gradeLabel(s.grade)}-${s.section} · Student ID ${s.admission_no}`}>
               <span className="muted">Academic year</span>
               <select style={{ width: "auto" }} value={d.selected_year} onChange={(e) => setYear(e.target.value)}>
                 {d.years.map((y) => <option key={y} value={y}>{y}{y === d.years[0] ? " (current)" : ""}</option>)}

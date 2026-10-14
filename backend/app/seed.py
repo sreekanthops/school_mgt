@@ -16,6 +16,7 @@ from .config import CURRENT_YEAR, ENV_PATH
 from .db import Base, SessionLocal, engine
 from .models import (EXAMS, GRADES, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, School, Staff,
                      Student, Subject, User)
+from .deps import CLASS_CODE
 from .security import TEACHER_DEFAULT, hash_password
 
 random.seed(42)
@@ -158,17 +159,18 @@ def main(reset: bool):
                 full_name=t.name, permissions=",".join(TEACHER_DEFAULT), staff_id=t.id))
 
     cur_start = int(CURRENT_YEAR[:4])
-    adm = 1000
     students = []
     for g in GRADES:
+        roll = 0
         for sec in ("A", "B"):
             for _ in range(6):
-                adm += 1
+                roll += 1
+                adm = f"{date.today().year}{CLASS_CODE[g]}{roll:03d}"  # student ID = login name
                 gender = random.choice(["Male", "Female"])
                 name = f"{random.choice(MALE if gender == 'Male' else FEMALE)} {random.choice(LAST)}"
                 age = 3 if g == "LKG" else 4 if g == "UKG" else 5 + int(g)
                 st = Student(
-                    school_id=sid, admission_no=f"ADM{adm}", name=name, gender=gender,
+                    school_id=sid, admission_no=adm, name=name, gender=gender,
                     dob=date(cur_start - age, random.randint(1, 12), random.randint(1, 28)),
                     grade=g, section=sec, guardian_name=f"{random.choice(MALE)} {name.split()[1]}",
                     phone=f"+91 9{random.randint(100000000, 999999999)}", email=f"parent{adm}@example.com",
@@ -177,9 +179,11 @@ def main(reset: bool):
                 db.add(st)
                 students.append(st)
     db.flush()
-    demo = next(s for s in students if s.grade == "5" and s.section == "A")
-    db.add(User(school_id=sid, username="student", password_hash=hash_password(pw["STUDENT_PASSWORD"]),
-                role="student", full_name=demo.name, student_id=demo.id))
+    # every student gets a login: username = student ID. Demo only: they share STUDENT_PASSWORD
+    # (hashed once; real students get their own one-time password when created in the app).
+    student_hash = hash_password(pw["STUDENT_PASSWORD"])
+    db.add_all(User(school_id=sid, username=st.admission_no, password_hash=student_hash, role="student",
+                    full_name=st.name, student_id=st.id) for st in students)
 
     for st in students:
         ability = random.gauss(68, 15)
@@ -240,7 +244,9 @@ def main(reset: bool):
     db.add_all(Goal(school_id=sid, title=a, description=b, target_year=c, progress=d, status=e) for a, b, c, d, e in goals)
     db.commit()
     print(f"Seeded {len(students)} students, {len(staff_rows)} staff in 'Sunrise Public School' + empty 'Greenfield Academy'.")
-    print("Logins: superadmin / admin / teacher / student / owner2  (passwords in backend/.env)")
+    demo = next(s for s in students if s.grade == "5" and s.section == "A")
+    print(f"Logins: superadmin / admin / teacher / owner2 / any student ID e.g. {demo.admission_no} "
+          "(passwords in backend/.env)")
 
 
 if __name__ == "__main__":

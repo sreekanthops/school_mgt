@@ -11,10 +11,10 @@ from sqlalchemy.orm import Session
 from .. import analytics, storage
 from ..config import CURRENT_YEAR
 from ..db import get_db
-from ..deps import can_see_fees, can_see_student, get_owned, get_student
+from ..deps import can_see_fees, can_see_student, get_owned, get_student, next_student_code
 from ..models import EXAM_MAX, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, Staff, Student, Subject, User
 from ..schemas import FeeIn, MarkIn, PaymentIn, StaffIn, StudentIn
-from ..security import need, perm_set, school_user, staff_side
+from ..security import gen_password, hash_password, need, perm_set, school_user, staff_side
 
 router = APIRouter(prefix="/api")
 
@@ -108,27 +108,31 @@ def list_students(
 
 @router.post("/students", status_code=201)
 def add_student(data: StudentIn, user: User = Depends(need("students.manage")), db: Session = Depends(get_db)):
-    s = Student(school_id=user.school_id, **data.model_dump())
-    db.add(s)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(409, "Admission number already exists")
-    return _student_out(s)
+    """Creates the student with an auto-generated ID and a login (ID + one-time temporary password)."""
+    fields = data.model_dump(exclude={"admission_no"})
+    for _ in range(3):  # retry if two requests grab the same roll number
+        code = next_student_code(db, data.grade)
+        s = Student(school_id=user.school_id, admission_no=code, **fields)
+        db.add(s)
+        db.flush()
+        pw = gen_password()
+        db.add(User(school_id=user.school_id, username=code, password_hash=hash_password(pw), role="student",
+                    full_name=s.name, student_id=s.id))
+        try:
+            db.commit()
+            return {**_student_out(s), "login": {"username": code, "temp_password": pw}}
+        except IntegrityError:
+            db.rollback()
+    raise HTTPException(409, "Could not allocate a student ID, please try again")
 
 
 @router.put("/students/{sid}")
 def update_student(sid: int, data: StudentIn, user: User = Depends(need("students.manage")),
                    db: Session = Depends(get_db)):
     s = get_student(db, user, sid)
-    for k, v in data.model_dump().items():
+    for k, v in data.model_dump(exclude={"admission_no"}).items():  # the student ID never changes
         setattr(s, k, v)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(409, "Admission number already exists")
+    db.commit()
     return _student_out(s)
 
 

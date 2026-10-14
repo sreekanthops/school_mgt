@@ -176,18 +176,22 @@ def create_user(data: UserIn, actor: User = Depends(need("users.manage")), db: S
         raise HTTPException(403, "Only a school admin can create another admin")
     perms = _check_perms(actor, data.permissions) if data.role == "staff" else None
     student_id = staff_id = None
+    username = data.username
     if data.role == "student":
         st = db.get(Student, data.student_id) if data.student_id else None
         if not st or st.school_id != actor.school_id:
             raise HTTPException(422, "Choose a student from this school")
         student_id = st.id
+        username = st.admission_no  # students always sign in with their student ID
+    elif not username:
+        raise HTTPException(422, "Username is required")
     if data.staff_id:
         sf = db.get(Staff, data.staff_id)
         if not sf or sf.school_id != actor.school_id:
             raise HTTPException(422, "Choose a staff member from this school")
         staff_id = sf.id
     pw = gen_password()
-    u = User(school_id=actor.school_id, username=data.username, password_hash=hash_password(pw), role=data.role,
+    u = User(school_id=actor.school_id, username=username, password_hash=hash_password(pw), role=data.role,
              full_name=data.full_name, permissions=perms, student_id=student_id, staff_id=staff_id)
     db.add(u)
     try:

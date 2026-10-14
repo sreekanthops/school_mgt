@@ -37,7 +37,8 @@ class NewSchoolIn(BaseModel):
 
 
 class UserIn(BaseModel):
-    username: str = Field(min_length=3, max_length=50, pattern=r"^[A-Za-z0-9_.-]+$")
+    # ignored for students: their login name is always their student ID
+    username: Optional[str] = Field(default=None, min_length=3, max_length=50, pattern=r"^[A-Za-z0-9_.-]+$")
     full_name: str = Field(min_length=2, max_length=100)
     role: str = Field(pattern=r"^(admin|staff|student)$")
     permissions: list[str] = []
@@ -52,7 +53,7 @@ class UserUpdateIn(BaseModel):
 
 
 class StudentIn(BaseModel):
-    admission_no: str = Field(min_length=1, max_length=20)
+    admission_no: Optional[str] = Field(default=None, max_length=20)  # ignored: the ID is generated
     name: str = Field(min_length=2, max_length=100)
     gender: str = Field(pattern=r"^(Male|Female|Other)$")
     dob: date

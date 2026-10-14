@@ -269,15 +269,64 @@ def test_deactivated_user_cannot_use_token(client, world):
 
 def test_create_student_login_and_password_change(client, world):
     oh = login(client, "ownerA")
+    # any username sent for a student is ignored: the login name is the student ID
     r = client.post("/api/users", headers=oh, json={"username": "kid2", "full_name": "Bala Rao", "role": "student", "student_id": world["s2"]})
     assert r.status_code == 201
-    kh = login(client, "kid2", r.json()["temp_password"])
+    assert r.json()["username"] == "A2"
+    kh = login(client, "A2", r.json()["temp_password"])
     assert client.post("/api/auth/password", headers=kh, json={"current_password": "wrong", "new_password": "NewPassw0rd!!"}).status_code == 400
     assert client.post("/api/auth/password", headers=kh, json={"current_password": r.json()["temp_password"], "new_password": "NewPassw0rd!!"}).status_code == 204
-    login(client, "kid2", "NewPassw0rd!!")
+    login(client, "A2", "NewPassw0rd!!")
     # cannot link a student from another school
-    bad = client.post("/api/users", headers=oh, json={"username": "kid3", "full_name": "Other Kid", "role": "student", "student_id": world["sb"]})
+    bad = client.post("/api/users", headers=oh, json={"full_name": "Other Kid", "role": "student", "student_id": world["sb"]})
     assert bad.status_code == 422
+
+
+def _new_student(grade="9", name="Ravi Teja"):
+    return {"name": name, "gender": "Male", "dob": "2012-01-01", "grade": grade, "section": "A",
+            "guardian_name": "Parent", "phone": "9999999999"}
+
+
+def test_new_student_gets_id_and_login(client, world):
+    from datetime import date
+    oh = login(client, "ownerA")
+    y = date.today().year
+    r1 = client.post("/api/students", headers=oh, json=_new_student("9"))
+    r2 = client.post("/api/students", headers=oh, json=_new_student("9", "Sita Devi"))
+    assert r1.status_code == 201 and r2.status_code == 201
+    # year + 2-digit class + 3-digit roll: 9 digits, roll increments
+    assert r1.json()["admission_no"] == f"{y}09001"
+    assert r2.json()["admission_no"] == f"{y}09002"
+    assert r1.json()["login"]["username"] == f"{y}09001"
+    # the new student can sign in with ID + the one-time password, and sees only themself
+    sh = login(client, f"{y}09001", r1.json()["login"]["temp_password"])
+    assert client.get("/api/auth/me", headers=sh).json()["role"] == "student"
+    assert client.get(f"/api/students/{r2.json()['id']}", headers=sh).status_code == 403
+    # LKG / UKG / class 10 codes
+    assert client.post("/api/students", headers=oh, json=_new_student("LKG")).json()["admission_no"] == f"{y}90001"
+    assert client.post("/api/students", headers=oh, json=_new_student("10")).json()["admission_no"] == f"{y}10001"
+
+
+def test_student_id_is_unique_across_schools_and_not_editable(client, world):
+    from datetime import date
+    y = date.today().year
+    a = client.post("/api/students", headers=login(client, "ownerA"), json=_new_student("5"))
+    # a second school's student must not collide with the first school's login name
+    from app.db import SessionLocal
+    from app.models import User
+    with SessionLocal() as db:
+        ob = db.query(User).filter_by(username="ownerB").one()
+        assert ob.school_id == world["b"]
+    b = client.post("/api/students", headers=login(client, "ownerB"), json=_new_student("5", "B Kid"))
+    assert a.json()["admission_no"] == f"{y}05001"
+    assert b.json()["admission_no"] == f"{y}05002"
+    # sending an admission_no on create or update is ignored
+    oh = login(client, "ownerA")
+    body = {**_new_student("5"), "admission_no": "HACK1"}
+    c = client.post("/api/students", headers=oh, json=body)
+    assert c.json()["admission_no"] == f"{y}05003"
+    u = client.put(f"/api/students/{c.json()['id']}", headers=oh, json={**body, "name": "Renamed Kid"})
+    assert u.json()["admission_no"] == f"{y}05003" and u.json()["name"] == "Renamed Kid"
 
 
 def test_no_auth_gets_401(client, world):

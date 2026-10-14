@@ -33,8 +33,16 @@ Passwords are generated into `backend/.env` (git-ignored). Run `grep PASSWORD ba
 | `superadmin` | Platform owner | Create/disable/delete schools, hand each owner a login |
 | `admin` | School owner (Sunrise Public School) | Everything in that school, plus users and permissions |
 | `teacher` | Staff | View students, enter marks only (granted permissions) |
-| `student` | Student | Own profile, marks, fees; subjects, staff, events, gallery; never other students' data |
+| `202605001` (any student ID) | Student | Own profile, marks, fees; subjects, staff, events, gallery; never other students' data. All demo students share `STUDENT_PASSWORD` |
 | `owner2` | School owner (Greenfield Academy) | A brand-new, empty school |
+
+## Student IDs and logins
+
+Every student gets a 9-digit ID generated as **year + 2-digit class + 3-digit roll number**, e.g.
+`202609011` = 2026, class 9, roll 011 (LKG = `90`, UKG = `91`, class 10 = `10`). The ID is the
+student's login name. Adding a student in the app creates the ID and the login together and shows
+the one-time temporary password once; share it with the student or parent. The ID never changes, and
+IDs are unique across the whole platform, so two schools can never share a login name.
 
 ## Roles and permissions
 

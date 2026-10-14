@@ -3,7 +3,6 @@ import { GRADES, gradeLabel } from "./api.js";
 export const SECTIONS = ["A", "B", "C", "D"];
 
 export const studentFields = [
-  { key: "admission_no", label: "Admission no.", required: true },
   { key: "name", label: "Full name", required: true },
   { key: "gender", label: "Gender", type: "select", options: ["Male", "Female", "Other"], default: "Male" },
   { key: "dob", label: "Date of birth", type: "date", required: true },

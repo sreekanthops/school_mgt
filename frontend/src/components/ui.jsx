@@ -193,11 +193,11 @@ export function Confirm({ title, message, onConfirm, onClose, danger = true }) {
 }
 
 /** Shows a credential once (temp password) with a copy button. */
-export function Secret({ title, username, password, onClose }) {
+export function Secret({ title, username, password, idLabel = "Username", onClose }) {
   return (
     <Modal title={title} onClose={onClose}>
       <p className="muted">Share these with the user securely. The password is shown only once; they should change it after the first login.</p>
-      <dl className="kv"><dt>Username</dt><dd><b>{username}</b></dd><dt>Temporary password</dt><dd><code>{password}</code></dd></dl>
+      <dl className="kv"><dt>{idLabel}</dt><dd><b>{username}</b></dd><dt>Temporary password</dt><dd><code>{password}</code></dd></dl>
       <div className="modal-foot">
         <button className="btn ghost" onClick={() => navigator.clipboard?.writeText(`${username} / ${password}`)}>Copy</button>
         <button className="btn" onClick={onClose}>Done</button>

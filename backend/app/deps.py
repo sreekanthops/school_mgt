@@ -1,12 +1,31 @@
 """Shared helpers. Every lookup of tenant data goes through these so a record from another
 school behaves exactly like a missing record (404)."""
+from datetime import date
 from typing import Optional, Type
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import Chapter, Staff, Student, Subject, User
 from .security import perm_set
+
+# Student ID = YYYY + 2-digit class code + 3-digit roll number, e.g. 202609011 = 2026, class 9, roll 011.
+# LKG/UKG have no class number, so they get 90/91.
+CLASS_CODE = {"LKG": "90", "UKG": "91", **{str(i): f"{i:02d}" for i in range(1, 11)}}
+
+
+def next_student_code(db: Session, grade: str, year: Optional[int] = None) -> str:
+    """Next free student ID. Student IDs are login names, which are unique across the platform,
+    so the roll number is allocated against every school, not just the caller's."""
+    prefix = f"{year or date.today().year}{CLASS_CODE[grade]}"
+    taken = list(db.scalars(select(User.username).where(User.username.like(f"{prefix}%"))))
+    taken += db.scalars(select(Student.admission_no).where(Student.admission_no.like(f"{prefix}%")))
+    rolls = [int(c[len(prefix):]) for c in taken if len(c) == len(prefix) + 3 and c[len(prefix):].isdigit()]
+    nxt = max(rolls, default=0) + 1
+    if nxt > 999:
+        raise HTTPException(409, "No roll numbers left for this class and year")
+    return f"{prefix}{nxt:03d}"
 
 
 def get_owned(db: Session, model: Type, obj_id: int, school_id: int):
