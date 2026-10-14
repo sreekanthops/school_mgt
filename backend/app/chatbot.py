@@ -1,0 +1,204 @@
+"""School assistant. Answers are built only from database facts (no generated SQL).
+
+Pipeline: detect entities (student / staff / class) -> detect intent -> gather facts ->
+render a deterministic answer. If an LLM endpoint is configured, the facts are sent to it
+purely to phrase a friendlier reply; the grounded answer is the fallback.
+"""
+import logging
+import re
+from datetime import date
+
+import httpx
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from . import analytics
+from .config import CURRENT_YEAR, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from .models import GRADES, Event, Goal, Setting, Staff, Student, Subject
+
+log = logging.getLogger("school.chatbot")
+MAX_Q = 500
+
+SUGGESTIONS = [
+    "How many students are in class 5?",
+    "Which students have pending fees?",
+    "Who are the top performers?",
+    "Which subjects does class 8 have?",
+    "Who is the class teacher of class 3?",
+    "What events are coming up?",
+]
+
+
+def _money(v: float) -> str:
+    return f"₹{v:,.0f}"
+
+
+def _find_grade(q: str) -> str | None:
+    if re.search(r"\bukg\b", q):
+        return "UKG"
+    if re.search(r"\blkg\b", q):
+        return "LKG"
+    m = re.search(r"(?:class|grade|std|standard)\s*(10|[1-9])\b", q) or re.search(r"\b(10|[1-9])(?:st|nd|rd|th)\b", q)
+    return m.group(1) if m else None
+
+
+def _find_students(db: Session, q: str) -> list[Student]:
+    students = db.scalars(select(Student)).all()
+    full = [s for s in students if s.name.lower() in q]
+    if full:
+        return full[:5]
+    words = set(re.findall(r"[a-z]{3,}", q))
+    first = [s for s in students if s.name.lower().split()[0] in words]
+    return first[:5]
+
+
+def _find_staff(db: Session, q: str) -> list[Staff]:
+    staff = db.scalars(select(Staff)).all()
+    full = [s for s in staff if s.name.lower() in q]
+    if full:
+        return full[:5]
+    words = set(re.findall(r"[a-z]{4,}", q))
+    skip = {"mr", "mrs", "ms", "dr"}
+    return [s for s in staff if any(p in words for p in s.name.lower().replace(".", "").split() if p not in skip and len(p) >= 4)][:5]
+
+
+def _has(q: str, *words: str) -> bool:
+    return any(w in q for w in words)
+
+
+def _student_answer(db: Session, s: Student, q: str) -> str:
+    perf = analytics.performance(db, s, CURRENT_YEAR)
+    fee = analytics.fee_summary(db, s.id, CURRENT_YEAR)
+    head = f"{s.name} (Class {s.grade}-{s.section}, Adm. {s.admission_no})"
+    if _has(q, "fee", "pending", "paid", "due", "balance", "payment"):
+        return (f"{head}: total fee {_money(fee['total'])}, paid {_money(fee['paid'])}, "
+                f"pending {_money(fee['pending'])} ({fee['status']}).")
+    if _has(q, "weak", "lack", "improv", "struggl", "poor", "behind"):
+        if not perf["has_data"]:
+            return f"{head} has no marks recorded for {CURRENT_YEAR} yet."
+        return f"{head}: " + " ".join(perf["insights"])
+    if _has(q, "parent", "guardian", "phone", "contact", "address", "email", "dob", "birth"):
+        return (f"{head}: guardian {s.guardian_name}, phone {s.phone}, email {s.email or 'n/a'}, "
+                f"DOB {s.dob.isoformat()}, address {s.address or 'n/a'}.")
+    if not perf["has_data"]:
+        return f"{head}: no marks recorded for {CURRENT_YEAR} yet. Fee pending {_money(fee['pending'])}."
+    rank = analytics.class_rank(db, s, CURRENT_YEAR)
+    rank_txt = f" Rank {rank['rank']} of {rank['out_of']} in the section." if rank else ""
+    weak = ", ".join(perf["weak_subjects"]) or "none"
+    best = perf["subjects"][-1]
+    return (f"{head}: overall {perf['overall_pct']}% (grade {perf['letter']}).{rank_txt} "
+            f"Strongest: {best['subject']} ({best['avg_pct']}%). Needs attention: {weak}. "
+            f"Fee pending {_money(fee['pending'])}.")
+
+
+def _staff_answer(s: Staff) -> str:
+    ct = f", class teacher of {s.class_teacher_of}" if s.class_teacher_of else ""
+    return (f"{s.name} ({s.employee_id}) is {s.designation}, {s.department}{ct}. "
+            f"{s.qualification}, {s.experience_years} yrs experience. Teaches: {s.subjects or 'n/a'}. "
+            f"Contact: {s.phone}, {s.email}.")
+
+
+def answer_rules(db: Session, question: str) -> str:
+    q = question.lower().strip()
+    grade = _find_grade(q)
+
+    students = _find_students(db, q)
+    if students:
+        return "\n".join(_student_answer(db, s, q) for s in students)
+
+    staff = _find_staff(db, q)
+    if staff and not _has(q, "how many"):
+        return "\n".join(_staff_answer(s) for s in staff)
+
+    if _has(q, "class teacher") and grade:
+        t = db.scalars(select(Staff).where(Staff.class_teacher_of.like(f"{grade}-%"))).all()
+        if t:
+            return "; ".join(f"Class {x.class_teacher_of}: {x.name}" for x in t) + "."
+        return f"No class teacher assigned for class {grade}."
+
+    if _has(q, "subject") and grade:
+        names = db.scalars(select(Subject.name).where(Subject.grade == grade).order_by(Subject.name)).all()
+        return f"Class {grade} subjects ({len(names)}): " + ", ".join(names) + "."
+
+    if _has(q, "fee", "pending", "defaulter", "outstanding", "collection", "due"):
+        d = analytics.dashboard(db, CURRENT_YEAR)
+        if grade:
+            g = next(x for x in d["by_grade"] if x["grade"] == grade)
+            return f"Class {grade}: {g['students']} students, pending fees {_money(g['pending_fee'])}."
+        f = d["fees"]
+        top = ", ".join(f"{x['name']} ({x['grade']}-{x['section']}, {_money(x['pending'])})" for x in d["top_defaulters"])
+        return (f"Fees {CURRENT_YEAR}: total {_money(f['total'])}, collected {_money(f['paid'])} "
+                f"({f['collection_pct']}%), pending {_money(f['pending'])}. Highest dues: {top}.")
+
+    if _has(q, "top", "topper", "best", "rank", "toppers", "performer"):
+        d = analytics.dashboard(db, CURRENT_YEAR)
+        return "Top performers: " + ", ".join(
+            f"{x['name']} ({x['grade']}-{x['section']}, {x['pct']}%)" for x in d["top_students"]) + "."
+
+    if _has(q, "at risk", "at-risk", "failing", "weak students", "low performing", "struggling"):
+        d = analytics.dashboard(db, CURRENT_YEAR)
+        if not d["at_risk"]:
+            return "No students are currently below the 50% benchmark."
+        return "Students needing support: " + ", ".join(
+            f"{x['name']} ({x['grade']}-{x['section']}, {x['pct']}%)" for x in d["at_risk"]) + "."
+
+    if _has(q, "how many", "count", "total", "number of") and _has(q, "teacher", "staff", "faculty"):
+        n = db.scalar(select(func.count()).select_from(Staff))
+        return f"The school has {n} staff members."
+
+    if _has(q, "how many", "count", "total", "number of", "strength") and _has(q, "student", "pupil", "children", "kids", "strength"):
+        if grade:
+            n = db.scalar(select(func.count()).select_from(Student).where(Student.grade == grade))
+            return f"Class {grade} has {n} students."
+        n = db.scalar(select(func.count()).select_from(Student))
+        return f"The school has {n} students across LKG to 10th."
+
+    if _has(q, "event", "upcoming", "function", "celebration", "sports day", "annual day"):
+        ev = db.scalars(select(Event).where(Event.date >= date.today()).order_by(Event.date).limit(5)).all()
+        if not ev:
+            ev = db.scalars(select(Event).order_by(Event.date.desc()).limit(5)).all()
+            lead = "No upcoming events. Most recent: "
+        else:
+            lead = "Upcoming events: "
+        return lead + "; ".join(f"{e.title} on {e.date.isoformat()} at {e.location}" for e in ev) + "."
+
+    if _has(q, "goal", "future", "vision", "plan", "roadmap"):
+        gs = db.scalars(select(Goal).order_by(Goal.target_year)).all()
+        return "Future goals: " + "; ".join(f"{g.title} ({g.target_year}, {g.progress}% done)" for g in gs) + "."
+
+    if _has(q, "about", "school", "mission", "history", "founded", "address", "principal"):
+        rows = {s.key: s.value for s in db.scalars(select(Setting))}
+        return " ".join(filter(None, [rows.get("about"), rows.get("mission"), rows.get("address")])) or "About information is not set up yet."
+
+    if _has(q, "subject"):
+        return "Which class? For example: \"Which subjects does class 8 have?\""
+
+    return ("I can answer about students, marks, fees, staff, subjects, events, goals and the school. "
+            "Try: " + " | ".join(SUGGESTIONS[:3]))
+
+
+def _llm_rephrase(question: str, facts: str) -> str | None:
+    if not (LLM_BASE_URL and LLM_API_KEY and LLM_MODEL) or not LLM_BASE_URL.startswith("https://"):
+        return None
+    try:
+        r = httpx.post(
+            LLM_BASE_URL.rstrip("/") + "/chat/completions",
+            headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+            json={"model": LLM_MODEL, "temperature": 0.2, "messages": [
+                {"role": "system", "content": "You are a school assistant. Answer ONLY using the FACTS. "
+                 "If the facts do not contain the answer, say you don't have that information. Be concise."},
+                {"role": "user", "content": f"FACTS:\n{facts}\n\nQUESTION: {question}"}]},
+            timeout=15.0,
+        )
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"].strip()
+    except Exception:  # noqa: BLE001 - fall back to the grounded answer
+        log.warning("llm_unavailable")
+        return None
+
+
+def ask(db: Session, question: str) -> dict:
+    question = question.strip()[:MAX_Q]
+    grounded = answer_rules(db, question)
+    phrased = _llm_rephrase(question, grounded)
+    return {"answer": phrased or grounded, "source": "llm" if phrased else "database", "suggestions": SUGGESTIONS}
