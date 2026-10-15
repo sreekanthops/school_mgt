@@ -634,3 +634,179 @@ def test_no_end_date_means_never_locked_and_superadmin_unaffected(client, world)
     sh = login(client, "super")  # the platform team can still manage an expired school
     assert client.get(f"/api/schools/{world['a']}", headers=sh).json()["subscription_status"] == "Expired"
     assert client.post(f"/api/schools/{world['a']}/branches", headers=sh, json={"name": "Still Works"}).status_code == 201
+
+
+# ---------- anonymous idea board ----------
+def test_language_filter_blocks_foul_text_but_not_normal_words():
+    from app.moderation import problem
+    for ok in ("We need more books in the library", "Please add an assessment calendar and a class trip",
+               "Canteen food could be tastier", "Longer PE period please", "Exams in March 2026 are too close together"):
+        assert problem(ok) is None, ok
+    for bad in ("this is shit", "f u c k this", "fuuuuck", "sh1t rules", "call me 9876543210", "mail me a@b.com",
+                "visit www.x.com", "kill yourself", "what an idiot", "p0rn", "madarchod"):
+        assert problem(bad), bad
+
+
+def test_board_post_and_filter(client, world):
+    kh = login(client, "kid1")
+    r = client.post("/api/board", headers=kh, json={"text": "Please add more books to the library"})
+    assert r.status_code == 201 and r.json()["mine"] is True
+    assert set(r.json()) >= {"agree_pct", "disagree_pct", "votes", "color", "tilt"}
+    bad = client.post("/api/board", headers=kh, json={"text": "this school is full of sh1t"})
+    assert bad.status_code == 422 and "sh1t" not in bad.text.lower()  # the reason never echoes the word
+    assert client.post("/api/board/check", headers=kh, json={"text": "fuck"}).json() == {"ok": False}
+    assert client.post("/api/board/check", headers=kh, json={"text": "More sports please"}).json() == {"ok": True}
+    assert client.post("/api/board", headers=kh, json={"text": "ab"}).status_code == 422
+    assert client.post("/api/board", json={"text": "No login here"}).status_code == 401
+
+
+def test_board_is_anonymous_and_school_scoped(client, world):
+    kh, oh, bh = login(client, "kid1"), login(client, "ownerA"), login(client, "ownerB")
+    client.post("/api/board", headers=kh, json={"text": "Add a robotics club for everyone"})
+    for h in (oh, kh):
+        body = client.get("/api/board", headers=h).text
+        assert "kid1" not in body and "Asha" not in body and "user_id" not in body and "author" not in body.replace("author_key", "")
+    items = client.get("/api/board", headers=oh).json()["items"]
+    assert len(items) == 1 and items[0]["mine"] is False
+    assert client.get("/api/board", headers=bh).json()["items"] == []  # another school sees nothing
+    assert client.delete(f"/api/board/{items[0]['id']}", headers=bh).status_code == 404
+
+
+def test_only_students_vote_once_with_percentages(client, world):
+    sh = login(client, "kid1")
+    other = client.post("/api/users", headers=login(client, "ownerA"),
+                        json={"full_name": "Bala Rao", "role": "student", "student_id": world["s2"]}).json()
+    s2h = login(client, other["username"], other["temp_password"])
+    nid = client.post("/api/board", headers=s2h, json={"text": "Start a school radio on Fridays"}).json()["id"]
+    assert client.post(f"/api/board/{nid}/vote", headers=s2h, json={"value": "agree"}).status_code == 403  # own note
+    assert client.post(f"/api/board/{nid}/vote", headers=sh, json={"value": "agree"}).json()["agree"] == 1
+    # voting again does not add a second vote, it changes the first
+    r = client.post(f"/api/board/{nid}/vote", headers=sh, json={"value": "disagree"}).json()
+    assert r["votes"] == 1 and r["disagree"] == 1 and r["agree"] == 0 and r["my_vote"] == "disagree"
+    r = client.post(f"/api/board/{nid}/vote", headers=sh, json={"value": "agree"}).json()
+    assert r["agree_pct"] == 100.0 and r["participation_pct"] == 50.0  # 1 of 2 students in school A
+    assert client.post(f"/api/board/{nid}/vote", headers=sh, json={"value": "maybe"}).status_code == 422
+    for who in ("ownerA", "teacherA"):
+        assert client.post(f"/api/board/{nid}/vote", headers=login(client, who), json={"value": "agree"}).status_code == 403
+    # a student from school B cannot vote on school A's note
+    assert client.delete(f"/api/board/{nid}/vote", headers=sh).status_code == 204
+    assert client.get("/api/board", headers=sh).json()["items"][0]["votes"] == 0
+
+
+def test_board_delete_rules_and_rate_limit(client, world):
+    kh, oh, th = login(client, "kid1"), login(client, "ownerA"), login(client, "teacherA")
+    nid = client.post("/api/board", headers=kh, json={"text": "Water coolers on every floor"}).json()["id"]
+    assert client.delete(f"/api/board/{nid}", headers=th).status_code == 403  # staff without content.manage
+    assert client.delete(f"/api/board/{nid}", headers=oh).status_code == 204  # owner moderates
+    n2 = client.post("/api/board", headers=kh, json={"text": "Longer lunch break please"}).json()["id"]
+    assert client.delete(f"/api/board/{n2}", headers=kh).status_code == 204  # author deletes own
+    codes = [client.post("/api/board", headers=kh, json={"text": f"Idea number {i} for the school"}).status_code for i in range(7)]
+    # 5 posts per 15 minutes: two were used above, so three more fit and the rest are refused
+    assert codes == [201, 201, 201, 429, 429, 429, 429]
+
+
+# ---------- password recovery with security questions ----------
+def _setup_recovery(client, username="kid1", password=PW, answers=("Rex", "Maple Street", "Anil")):
+    h = login(client, username, password)
+    qs = client.get("/api/auth/recovery/setup", headers=h).json()["questions"]
+    assert len(qs) == 3 and len({q["id"] for q in qs}) == 3
+    body = {"current_password": password, "answers": [{"id": q["id"], "answer": a} for q, a in zip(qs, answers)]}
+    assert client.post("/api/auth/recovery/setup", headers=h, json=body).status_code == 204
+    return [q["id"] for q in qs]
+
+
+def test_recovery_setup_validation(client, world):
+    h = login(client, "kid1")
+    qs = client.get("/api/auth/recovery/setup", headers=h).json()["questions"]
+    mk = lambda ans, pw=PW: {"current_password": pw, "answers": [{"id": q["id"], "answer": a} for q, a in zip(qs, ans)]}
+    assert client.post("/api/auth/recovery/setup", headers=h, json=mk(["Rex", "Elm", "Anil"], "wrong")).status_code == 400
+    assert client.post("/api/auth/recovery/setup", headers=h, json=mk(["Rex", "Elm", "Rex"])).status_code == 422  # repeated answer
+    assert client.post("/api/auth/recovery/setup", headers=h, json=mk(["Rex", "ab", "Anil"])).status_code == 422  # too short
+    dup = {"current_password": PW, "answers": [{"id": qs[0]["id"], "answer": a} for a in ("Rex", "Elm", "Anil")]}
+    assert client.post("/api/auth/recovery/setup", headers=h, json=dup).status_code == 422  # same question 3 times
+    assert client.post("/api/auth/recovery/setup", json=mk(["Rex", "Elm", "Anil"])).status_code == 401
+    assert client.get("/api/auth/me", headers=h).json()["recovery_set"] is False
+
+
+def test_forgot_password_with_correct_answers(client, world):
+    ids = _setup_recovery(client)
+    qs = client.post("/api/auth/forgot/questions", json={"username": "kid1"}).json()["questions"]
+    assert [q["id"] for q in qs] == ids  # the same questions again, same order
+    # case, spacing and punctuation do not matter
+    r = client.post("/api/auth/forgot/reset", json={"username": "kid1", "answers": [" REX ", "maple   street!", "anil"],
+                                                     "new_password": "BrandNewPass123"})
+    assert r.status_code == 204
+    assert client.post("/api/auth/login", json={"username": "kid1", "password": PW}).status_code == 401
+    login(client, "kid1", "BrandNewPass123")
+
+
+def test_forgot_password_wrong_answers_generic_and_locks(client, world):
+    _setup_recovery(client)
+    bad = lambda: client.post("/api/auth/forgot/reset", json={"username": "kid1", "answers": ["Rex", "Maple Street", "Wrong"],
+                                                              "new_password": "BrandNewPass123"})
+    first = bad()
+    assert first.status_code == 400
+    # an unknown user and a user with no recovery set up get the identical response
+    ghost = client.post("/api/auth/forgot/reset", json={"username": "nobody-x", "answers": ["aaa", "bbb", "ccc"], "new_password": "BrandNewPass123"})
+    unset = client.post("/api/auth/forgot/reset", json={"username": "ownerA", "answers": ["aaa", "bbb", "ccc"], "new_password": "BrandNewPass123"})
+    assert ghost.json() == unset.json() == first.json() and ghost.status_code == unset.status_code == 400
+    for _ in range(4):
+        bad()
+    assert bad().status_code == 429
+    # even the right answers are refused while locked, and the password is unchanged
+    ok = client.post("/api/auth/forgot/reset", json={"username": "kid1", "answers": ["Rex", "Maple Street", "Anil"], "new_password": "BrandNewPass123"})
+    assert ok.status_code == 429
+    login(client, "kid1")
+
+
+def test_forgot_questions_do_not_reveal_which_accounts_exist(client, world):
+    _setup_recovery(client)
+    real = client.post("/api/auth/forgot/questions", json={"username": "kid1"})
+    ghost1 = client.post("/api/auth/forgot/questions", json={"username": "no-such-person"})
+    ghost2 = client.post("/api/auth/forgot/questions", json={"username": "no-such-person"})
+    unset = client.post("/api/auth/forgot/questions", json={"username": "ownerA"})
+    for r in (real, ghost1, unset):
+        assert r.status_code == 200 and len(r.json()["questions"]) == 3
+    assert ghost1.json() == ghost2.json()  # a stable decoy, not different every time
+
+
+def test_disabled_user_cannot_recover(client, world):
+    _setup_recovery(client)
+    oh = login(client, "ownerA")
+    uid = next(u["id"] for u in client.get("/api/users", headers=oh).json() if u["username"] == "kid1")
+    client.put(f"/api/users/{uid}", headers=oh, json={"active": False})
+    r = client.post("/api/auth/forgot/reset", json={"username": "kid1", "answers": ["Rex", "Maple Street", "Anil"], "new_password": "BrandNewPass123"})
+    assert r.status_code == 400
+
+
+def test_admin_temp_password_forces_change(client, world):
+    oh = login(client, "ownerA")
+    uid = next(u["id"] for u in client.get("/api/users", headers=oh).json() if u["username"] == "teacherA")
+    temp = client.post(f"/api/users/{uid}/reset-password", headers=oh).json()["temp_password"]
+    th = login(client, "teacherA", temp)
+    assert client.get("/api/auth/me", headers=th).json()["must_change"] is True
+    # nothing but changing the password works until they do it
+    assert client.get("/api/students", headers=th).status_code == 403
+    assert client.get("/api/board", headers=th).status_code == 403
+    assert client.post("/api/auth/password", headers=th, json={"current_password": temp, "new_password": "MyOwnPassword123"}).status_code == 204
+    assert client.get("/api/students", headers=th).status_code == 200
+    assert client.get("/api/auth/me", headers=th).json()["must_change"] is False
+
+
+def test_owner_temp_password_from_superadmin_forces_change(client, world):
+    sh = login(client, "super")
+    temp = client.post(f"/api/schools/{world['a']}/owner/reset-password", headers=sh).json()["temp_password"]
+    oh = login(client, "ownerA", temp)
+    assert client.get("/api/dashboard", headers=oh).status_code == 403
+    assert client.post("/api/auth/password", headers=oh, json={"current_password": temp, "new_password": "MyOwnPassword123"}).status_code == 204
+    assert client.get("/api/dashboard", headers=oh).status_code == 200
+
+
+def test_recovery_answers_are_stored_hashed(client, world):
+    _setup_recovery(client)
+    from app.db import SessionLocal
+    from app.models import User
+    with SessionLocal() as db:
+        u = db.query(User).filter_by(username="kid1").one()
+        assert len(u.recovery_hashes) == 3 and all(h.startswith("$2") for h in u.recovery_hashes)
+        assert "rex" not in str(u.recovery_hashes).lower()

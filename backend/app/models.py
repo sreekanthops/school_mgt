@@ -86,6 +86,11 @@ class User(Base):
         ForeignKey("staff.id", ondelete="SET NULL"), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_login: Mapped[Optional[dt.datetime]] = mapped_column(DateTime, nullable=True)
+    # password recovery: 3 random question ids assigned at setup, and a bcrypt hash of each answer
+    recovery_q: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    recovery_hashes: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # set when an admin/IT person issues a temporary password; the user must choose their own before anything else
+    must_change: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
 
 class Subject(Base):
@@ -240,3 +245,26 @@ class DirectMessage(Base):
     read: Mapped[bool] = mapped_column(Boolean, default=False)
     hidden_sender: Mapped[bool] = mapped_column(Boolean, default=False)
     hidden_recipient: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class BoardNote(Base):
+    """An anonymous idea/opinion on the school board. There is deliberately no user_id column: the only link to
+    the writer is a keyed hash (author_key) that lets them delete their own note and be rate limited."""
+    __tablename__ = "board_notes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
+    text: Mapped[str] = mapped_column(String(300))
+    color: Mapped[str] = mapped_column(String(10))
+    tilt: Mapped[int] = mapped_column(Integer, default=0)
+    author_key: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class BoardVote(Base):
+    """One agree/disagree vote per student per note (voter_key is a keyed hash, not a user id)."""
+    __tablename__ = "board_votes"
+    __table_args__ = (UniqueConstraint("note_id", "voter_key"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    note_id: Mapped[int] = mapped_column(ForeignKey("board_notes.id", ondelete="CASCADE"), index=True)
+    voter_key: Mapped[str] = mapped_column(String(64))
+    value: Mapped[str] = mapped_column(String(8))  # agree | disagree

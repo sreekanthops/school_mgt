@@ -282,6 +282,7 @@ def reset_owner_password(school_id: int, sa: User = Depends(superadmin_only), db
         raise HTTPException(404, "Not found")
     pw = gen_password()
     owner.password_hash = hash_password(pw)
+    owner.must_change = True
     audit(db, sa, "owner_password_reset", s, owner.username)
     db.commit()
     return {"username": owner.username, "temp_password": pw}
@@ -309,6 +310,7 @@ def reset_user_password(school_id: int, uid: int, sa: User = Depends(superadmin_
     s, u = _school(db, school_id), _school_user(db, school_id, uid)
     pw = gen_password()
     u.password_hash = hash_password(pw)
+    u.must_change = True
     audit(db, sa, "user_password_reset", s, u.username)
     db.commit()
     return {"username": u.username, "temp_password": pw}

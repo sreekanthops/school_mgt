@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { GraduationCap, ShieldCheck, Users, BookOpen, Sparkles } from "lucide-react";
 import { useAuth } from "../auth.jsx";
 
@@ -51,6 +51,7 @@ export default function Login() {
             <input id="p" type="password" value={p} onChange={(e) => setP(e.target.value)} autoComplete="current-password" required />
           </div>
           <button className="btn" style={{ width: "100%", justifyContent: "center" }} disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+          <div style={{ textAlign: "center", marginTop: 14 }}><Link to="/forgot">Forgot password?</Link></div>
         </form>
       </div>
     </div>

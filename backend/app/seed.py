@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from .config import CURRENT_YEAR, ENV_PATH
 from .db import Base, SessionLocal, engine
-from .models import (EXAMS, GRADES, AuditLog, Branch, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, School, Staff,
+from .models import (EXAMS, GRADES, AuditLog, BoardNote, BoardVote, Branch, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, School, Staff,
                      Student, Subject, User)
 from .deps import make_code, staff_letter
 from .security import TEACHER_DEFAULT, hash_password
@@ -67,6 +67,11 @@ def ensure_env(key: str) -> str:
     os.environ[key] = val
     print(f"Generated {key} and saved it to backend/.env")
     return val
+
+
+def date_time_ago(hours: int):
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
 
 
 def fmt_year(s: int) -> str:
@@ -268,6 +273,16 @@ def main(reset: bool):
         ("100% digital parent communication", "Fees, attendance and progress on the parent app.", 2026, 75, "In Progress"),
         ("Inclusive learning centre", "Resource room and trained special educators.", 2029, 5, "Planned"),
     ]
+    notes = [("Can we have a longer lunch break on Fridays?", 31, 6), ("Please add more books to the library, especially story books.", 44, 2),
+             ("A robotics club for classes 6 to 10 would be amazing!", 38, 4), ("Less homework on weekends please.", 22, 21),
+             ("Install water coolers on every floor.", 40, 1), ("Start a school radio where students host a show.", 27, 9)]
+    colors = ["yellow", "pink", "blue", "green", "orange", "lilac"]
+    for i, (text, yes, no) in enumerate(notes):
+        n = BoardNote(school_id=sid, text=text, color=colors[i % 6], tilt=(i * 5) % 7 - 3, author_key=f"demo-author-{i}",
+                      created_at=date_time_ago(hours=i * 7 + 2))
+        db.add(n)
+        db.flush()
+        db.add_all(BoardVote(note_id=n.id, voter_key=f"demo-{i}-{k}", value="agree" if k < yes else "disagree") for k in range(yes + no))
     db.add_all(Goal(school_id=sid, title=a, description=b, target_year=c, progress=d, status=e) for a, b, c, d, e in goals)
     db.commit()
     print(f"Seeded {len(students)} students, {len(staff_rows)} staff in 'Sunrise Public School' + empty 'Greenfield Academy'.")

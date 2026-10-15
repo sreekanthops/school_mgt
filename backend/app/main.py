@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from .config import CORS_ORIGINS
 from .db import Base, engine
-from .routers import academics, accounts, messages, people, platform
+from .routers import academics, accounts, board, messages, people, platform, recovery
 
 logging.basicConfig(level=logging.INFO, format='{"level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}')
 log = logging.getLogger("school")
@@ -40,6 +40,8 @@ app.include_router(platform.router)
 app.include_router(people.router)
 app.include_router(academics.router)
 app.include_router(messages.router)
+app.include_router(board.router)
+app.include_router(recovery.router)
 
 
 @app.get("/api/health")

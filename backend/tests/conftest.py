@@ -74,6 +74,7 @@ def world():
 def client():
     from app import security
     security._fails.clear()
+    security._hits.clear()
     return TestClient(app)
 
 

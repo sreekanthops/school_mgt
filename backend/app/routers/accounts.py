@@ -26,6 +26,7 @@ def _me(user: User, db: Session) -> dict:
         "permissions": sorted(perm_set(user)), "student_id": user.student_id, "staff_id": user.staff_id,
         "school": {"id": school.id, "name": school.name} if school else None,
         # reminders and the read-only lock apply to owners and staff only, never to students
+        "must_change": bool(user.must_change), "recovery_set": bool(user.recovery_hashes),
         "subscription": subscription_info(school.subscription_end) if school and user.role != "student" else None,
     }
 
@@ -59,6 +60,7 @@ def change_password(data: PasswordChangeIn, user: User = Depends(current_user), 
     if not verify_password(data.current_password, user.password_hash):
         raise HTTPException(400, "Current password is incorrect")
     user.password_hash = hash_password(data.new_password)
+    user.must_change = False
     db.commit()
 
 
@@ -180,6 +182,7 @@ def reset_password(uid: int, actor: User = Depends(need("users.manage")), db: Se
     u = _target(db, actor, uid)
     pw = gen_password()
     u.password_hash = hash_password(pw)
+    u.must_change = True  # a temporary password only lets the user in to choose their own
     db.commit()
     return {"username": u.username, "temp_password": pw}
 

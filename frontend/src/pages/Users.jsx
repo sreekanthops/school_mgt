@@ -161,7 +161,7 @@ export default function UsersPage() {
                 onSaved={(created) => { reload(); if (created) setSecret({ title: "User created", username: created.username, password: created.temp_password }); }} />
             )}
             {dlg?.type === "reset" && (
-              <Confirm danger={false} title="Reset password" message={`Generate a new temporary password for ${dlg.u.username}?`} onClose={() => setDlg(null)}
+              <Confirm danger={false} title="Issue temporary password" message={`Issue a temporary password for ${dlg.u.username}? Give it to them in person (they should contact you directly). They must choose their own password when they sign in with it.`} onClose={() => setDlg(null)}
                 onConfirm={async () => {
                   const r = await api(`/users/${dlg.u.id}/reset-password`, { method: "POST" });
                   setSecret({ title: "Password reset", username: r.username, password: r.temp_password });

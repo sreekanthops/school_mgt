@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import logging
 import secrets
 import time
@@ -63,10 +65,27 @@ def gen_password() -> str:
     return secrets.token_urlsafe(9)
 
 
-def is_locked(username: str) -> bool:
+def is_locked(username: str, limit: int = MAX_FAILS) -> bool:
     now = time.time()
     _fails[username] = [t for t in _fails[username] if now - t < LOCK_SECONDS]
-    return len(_fails[username]) >= MAX_FAILS
+    return len(_fails[username]) >= limit
+
+
+_hits = defaultdict(list)  # key -> [timestamps] for plain request-rate limits
+
+
+def rate_limit(key: str, limit: int) -> None:
+    """Allow at most `limit` calls per key per 15 minutes; raises 429 beyond that."""
+    now = time.time()
+    _hits[key] = [t for t in _hits[key] if now - t < LOCK_SECONDS]
+    if len(_hits[key]) >= limit:
+        raise HTTPException(429, "Too many requests. Try again later.")
+    _hits[key].append(now)
+
+
+def anon_key(purpose: str, school_id: int, user_id: int) -> str:
+    """Keyed hash used where the app must recognise 'the same person' without storing who they are."""
+    return hmac.new(JWT_SECRET.encode(), f"{purpose}:{school_id}:{user_id}".encode(), hashlib.sha256).hexdigest()
 
 
 def record_failure(username: str) -> None:
@@ -122,6 +141,8 @@ def school_user(request: Request, user: User = Depends(current_user), db: Sessio
     school = db.get(School, user.school_id)
     if not school or not school.active:
         raise HTTPException(403, "This school account is disabled")
+    if user.must_change and not request.url.path.startswith("/api/auth"):
+        raise HTTPException(403, "Please change your temporary password first")
     if (user.role != "student" and request.method not in SAFE_METHODS
             and subscription_info(school.subscription_end)["locked"]
             and not request.url.path.startswith(LOCK_EXEMPT)):

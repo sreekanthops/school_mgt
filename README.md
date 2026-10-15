@@ -99,6 +99,31 @@ Edit controls (add / edit / delete) appear only where the user holds the matchin
 - **Data note:** the superadmin sees only counts and aggregates (no individual marks or student profiles).
 - API: `GET /api/platform/overview`, `GET/PUT /api/schools/{id}`, `/api/schools/{id}/branches`, `/api/audit`; all superadmin-only.
 
+## Anonymous Idea Board
+
+- Everyone in a school (owner, staff, students) can post a short note (3 to 300 characters) about school life. Notes
+  look like handwritten sticky notes (the bundled Caveat font, no external requests).
+- **Anonymous by design:** a note stores only a keyed hash of the writer, never a user id, and no API returns who
+  wrote or voted. Writers can delete their own notes; owners/staff with `content.manage` can remove any note.
+- **Language filter (server-side):** profanity, sexual wording, slurs, threats and abuse in English plus common
+  Hindi/Telugu words in English letters are refused, including disguised forms ("sh1t", "f u c k", "fuuuck").
+  Phone numbers, e-mail addresses and links are refused too. The editor warns as you type; the refusal never
+  repeats the offending word. A word list cannot catch everything, which is why moderators can remove notes.
+- **Voting:** only students vote, one vote per student per note (voting again changes it, tapping again removes
+  it), not on their own note. Each note shows % agree, % disagree, vote count and the share of students who voted.
+  Sort by newest, most agreed or most debated. Posting is limited to 5 notes per 15 minutes per person.
+
+## Forgot password
+
+1. **Set up** (My Account → Password recovery questions): the app picks 3 random questions from a bank of 12; the
+   user answers them. Answers are normalised (case/punctuation ignored) and stored only as bcrypt hashes.
+2. **Forgot?** (sign-in page → "Forgot password?"): enter the Login ID, get the same 3 questions again, answer all
+   three and choose a new password. Five wrong attempts lock recovery for that ID for 15 minutes. Unknown IDs and IDs
+   that never set recovery up get the same questions-shaped response and the same generic failure.
+3. **Still stuck?** The school admin / IT department (anyone with `users.manage`; the superadmin for an owner) issues
+   a **temporary password** from Users & Access → key icon. It is shared in person (the user contacts the office),
+   works for sign-in only, and the user is forced to choose their own password before anything else.
+
 ## Messaging rules
 
 Owners and staff can message anyone in their school. Students can message staff and the owner, never

@@ -1,13 +1,14 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import {
-  AlertTriangle, BookOpen, Building2, CalendarDays, GraduationCap, Images, Info, KeyRound, LayoutDashboard, LogOut, Menu,
+  AlertTriangle, BookOpen, Building2, Lightbulb, CalendarDays, GraduationCap, Images, Info, KeyRound, LayoutDashboard, LogOut, Menu,
   MessagesSquare, ShieldCheck, Target, UserCircle, Users, Wallet, Camera, GraduationCap as Logo,
 } from "lucide-react";
 import { api } from "./api.js";
 import { useAuth } from "./auth.jsx";
 import Chatbot from "./components/Chatbot.jsx";
 import { Photo } from "./components/ui.jsx";
+import ForgotPassword from "./pages/ForgotPassword.jsx";
 import Login from "./pages/Login.jsx";
 
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
@@ -28,6 +29,7 @@ const Schools = lazy(() => import("./pages/Schools.jsx"));
 const SchoolDetail = lazy(() => import("./pages/SchoolDetail.jsx"));
 const Account = lazy(() => import("./pages/Account.jsx"));
 const Messages = lazy(() => import("./pages/Messages.jsx"));
+const Board = lazy(() => import("./pages/Board.jsx"));
 
 /** [path, label, icon, visible(auth) , group] */
 const NAV = [
@@ -38,6 +40,7 @@ const NAV = [
   ["/subjects", "Subjects", BookOpen, (a) => !a.isSuper, "School"],
   ["/fees", "Fees", Wallet, (a) => a.can("fees.view") || a.can("fees.manage"), "School"],
   ["/messages", "Messages", MessagesSquare, (a) => !a.isSuper, "Campus"],
+  ["/board", "Idea Board", Lightbulb, (a) => !a.isSuper, "Campus"],
   ["/events", "Events", CalendarDays, (a) => !a.isSuper, "Campus"],
   ["/gallery", "Gallery", Images, (a) => !a.isSuper, "Campus"],
   ["/goals", "Future Goals", Target, (a) => !a.isSuper, "Campus"],
@@ -87,6 +90,7 @@ function Shell() {
     return () => clearInterval(t);
   }, [session, isSuper, loc.pathname]);
   if (!session) return <Navigate to="/login" replace />;
+  if (session.must_change && loc.pathname !== "/account") return <Navigate to="/account" replace />;
 
   const locked = !!session.subscription?.locked;
   const items = NAV.filter((n) => n[3](auth));
@@ -142,6 +146,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/forgot" element={<ForgotPassword />} />
       <Route element={<Shell />}>
         <Route index element={a.isSuper ? <Navigate to="/schools" replace /> : a.isStudent ? <Navigate to="/me" replace /> : <Dashboard />} />
         <Route path="dashboard" element={<Navigate to="/" replace />} />
@@ -154,6 +159,7 @@ export default function App() {
         <Route path="staff" element={<Guard ok={!a.isSuper}><Staff /></Guard>} />
         <Route path="staff/:id" element={<Guard ok={!a.isSuper}><StaffDetail /></Guard>} />
         <Route path="messages" element={<Guard ok={!a.isSuper}><Messages /></Guard>} />
+        <Route path="board" element={<Guard ok={!a.isSuper}><Board /></Guard>} />
         <Route path="events" element={<Guard ok={!a.isSuper}><Events /></Guard>} />
         <Route path="gallery" element={<Guard ok={!a.isSuper}><Gallery /></Guard>} />
         <Route path="goals" element={<Guard ok={!a.isSuper}><Goals /></Guard>} />
