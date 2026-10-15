@@ -172,3 +172,10 @@ tr.click { cursor: pointer; } tr.click:hover td { background: #f8f7ff; }
   .mail { grid-template-columns: 1fr; } .mail.open .mail-list { display: none; } .mail:not(.open) .mail-pane { display: none; } .mail-back { display: inline-grid; }
   .chat { right: 8px; bottom: 84px; width: calc(100vw - 16px); }
 }
+
+/* subscription reminders and the read-only lock */
+.sub-banner { display: flex; gap: 10px; align-items: flex-start; padding: 11px 32px; font-weight: 500; }
+.sub-banner svg { flex: none; margin-top: 2px; }
+.sub-banner.warn { background: #fef3c7; color: #92400e; } .sub-banner.bad { background: #ffe4e6; color: #9f1239; }
+.main.locked .btn:not(.keep), .main.locked .icon-btn:not(.keep), .main.locked .stat-add { opacity: .4; pointer-events: none; filter: grayscale(.6); cursor: not-allowed; }
+@media (max-width: 860px) { .sub-banner { padding: 10px 16px; } }

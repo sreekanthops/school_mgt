@@ -18,13 +18,12 @@ from ..deps import make_code
 from ..models import (GRADES, AuditLog, Branch, Chapter, Event, GalleryItem, Goal, School, Staff,
                       Student, Subject, User)
 from ..schemas import YEAR, BranchIn, BranchStateIn, NewSchoolIn, SchoolAdminIn
-from ..security import gen_password, hash_password, superadmin_only
+from ..security import gen_password, hash_password, subscription_info, superadmin_only
 
 router = APIRouter(prefix="/api")
 log = logging.getLogger("school.platform")
 
 NON_NULL = {"plan", "max_students", "max_staff"}  # an empty form value keeps the current setting
-EXPIRY_WARN_DAYS = 30
 
 
 class ActiveIn(BaseModel):
@@ -63,11 +62,7 @@ def _grouped(db: Session, model, key=None) -> dict:
 
 
 def sub_status(end: Optional[date]) -> str:
-    if end is None:
-        return "No expiry"
-    if end < date.today():
-        return "Expired"
-    return "Expiring" if (end - date.today()).days <= EXPIRY_WARN_DAYS else "Active"
+    return subscription_info(end)["status"]
 
 
 def _usage(used: int, limit: int) -> dict:
@@ -81,6 +76,7 @@ def _profile(s: School) -> dict:
         "plan": s.plan, "max_students": s.max_students, "max_staff": s.max_staff,
         "subscription_end": s.subscription_end.isoformat() if s.subscription_end else None,
         "subscription_status": sub_status(s.subscription_end), "notes": s.notes,
+        "subscription_days_left": subscription_info(s.subscription_end)["days_left"],
         "about": s.about, "mission": s.mission, "vision": s.vision, "contact": s.contact,
         "active": s.active, "created_at": s.created_at.isoformat(),
     }

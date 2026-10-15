@@ -79,8 +79,8 @@ export default function Students() {
             </table>
             <div className="pager">
               <span className="muted small">{d.total} students · page {d.page} of {Math.max(1, Math.ceil(d.total / d.page_size))}</span>
-              <button className="btn ghost sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</button>
-              <button className="btn ghost sm" disabled={page * d.page_size >= d.total} onClick={() => setPage(page + 1)}>Next</button>
+              <button className="btn ghost sm keep" disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</button>
+              <button className="btn ghost sm keep" disabled={page * d.page_size >= d.total} onClick={() => setPage(page + 1)}>Next</button>
             </div>
           </div>
         )}

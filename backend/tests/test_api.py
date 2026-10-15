@@ -567,3 +567,70 @@ def test_login_records_last_login_and_school_delete_keeps_audit(client, world):
     assert d["owner"]["last_login"] and d["active_users_7d"] >= 1
     assert client.delete(f"/api/schools/{world['b']}", headers=h).status_code == 204
     assert any(a["action"] == "school_deleted" and a["school_name"] == "School B" for a in client.get("/api/audit", headers=h).json())
+
+
+# ---------- subscription reminders and read-only lock ----------
+def _set_end(client, world, delta_days):
+    from datetime import date, timedelta
+    end = (date.today() + timedelta(days=delta_days)).isoformat()
+    r = client.put(f"/api/schools/{world['a']}", headers=login(client, "super"), json={"name": "School A", "subscription_end": end})
+    assert r.status_code == 200
+
+
+def test_three_reminders_as_the_end_date_nears(client, world):
+    stages = {}
+    for days in (60, 30, 14, 7, 0):
+        _set_end(client, world, days)
+        sub = client.get("/api/auth/me", headers=login(client, "ownerA")).json()["subscription"]
+        stages[days] = (sub["reminder"], sub["locked"], sub["days_left"])
+    assert stages == {60: (0, False, 60), 30: (1, False, 30), 14: (2, False, 14), 7: (3, False, 7), 0: (3, False, 0)}
+    # the login response carries it too, and teachers get it as well
+    assert client.post("/api/auth/login", json={"username": "teacherA", "password": PW}).json()["subscription"]["reminder"] == 3
+
+
+def test_expired_school_is_read_only_for_owner_and_staff(client, world):
+    _set_end(client, world, -1)
+    oh, th = login(client, "ownerA"), login(client, "teacherA")  # sign-in still works
+    assert client.get("/api/auth/me", headers=oh).json()["subscription"]["locked"] is True
+    # reading still works
+    assert client.get("/api/students", headers=oh).status_code == 200
+    assert client.get("/api/dashboard", headers=oh).status_code == 200
+    assert client.get("/api/fees", headers=oh).status_code == 200
+    # every change is refused
+    r = client.post("/api/students", headers=oh, json=_new_student("5"))
+    assert r.status_code == 403 and "expired" in r.json()["detail"].lower()
+    assert client.post(f"/api/students/{world['s1']}/marks", headers=th, json={"subject_id": world["sub_a"], "exam": "UT2", "academic_year": "2025-26", "score": 10}).status_code == 403
+    assert client.post(f"/api/students/{world['s1']}/payments", headers=oh, json={"academic_year": "2025-26", "amount": 100, "mode": "Cash"}).status_code == 403
+    assert client.put("/api/school", headers=oh, json={"name": "Renamed"}).status_code == 403
+    assert client.post("/api/users", headers=oh, json={"username": "late", "full_name": "Late User", "role": "staff"}).status_code == 403
+    assert client.delete(f"/api/students/{world['s2']}", headers=oh).status_code == 403
+    # messaging, the assistant and the user's own password stay open
+    tid = next(u["id"] for u in client.get("/api/messages/contacts", headers=oh).json() if u.get("username") == "teacherA" or u.get("name") == "Teacher A")
+    assert client.post(f"/api/messages/with/{tid}", headers=oh, json={"body": "hello"}).status_code == 201
+    assert client.post("/api/chat", headers=oh, json={"question": "how many students"}).status_code == 200
+    assert client.post("/api/auth/password", headers=oh, json={"current_password": PW, "new_password": "BrandNewPass123"}).status_code == 204
+
+
+def test_students_are_never_locked_and_renewal_unlocks(client, world):
+    _set_end(client, world, -30)
+    sh = login(client, "kid1")
+    me = client.get("/api/auth/me", headers=sh).json()
+    assert me["subscription"] is None  # students see no reminder and no lock
+    assert client.get(f"/api/students/{world['s1']}", headers=sh).status_code == 200
+    assert client.get("/api/subjects", headers=sh).status_code == 200
+    assert client.post(f"/api/students/{world['s1']}/photo-request", headers={**sh, "Content-Type": "application/octet-stream"}, content=PNG).status_code == 204
+    oh = login(client, "ownerA")
+    assert client.post("/api/students", headers=oh, json=_new_student("5")).status_code == 403
+    _set_end(client, world, 365)  # renewed
+    assert client.post("/api/students", headers=oh, json=_new_student("5")).status_code == 201
+    assert client.get("/api/auth/me", headers=oh).json()["subscription"]["locked"] is False
+
+
+def test_no_end_date_means_never_locked_and_superadmin_unaffected(client, world):
+    oh = login(client, "ownerA")
+    assert client.get("/api/auth/me", headers=oh).json()["subscription"]["status"] == "No expiry"
+    assert client.post("/api/students", headers=oh, json=_new_student("5")).status_code == 201
+    _set_end(client, world, -5)
+    sh = login(client, "super")  # the platform team can still manage an expired school
+    assert client.get(f"/api/schools/{world['a']}", headers=sh).json()["subscription_status"] == "Expired"
+    assert client.post(f"/api/schools/{world['a']}/branches", headers=sh, json={"name": "Still Works"}).status_code == 201

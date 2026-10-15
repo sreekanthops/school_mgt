@@ -2,11 +2,12 @@ import logging
 import secrets
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -93,13 +94,38 @@ def current_user(
     return user
 
 
-def school_user(user: User = Depends(current_user), db: Session = Depends(get_db)) -> User:
-    """Any authenticated user that belongs to an active school (everyone except the superadmin)."""
+# Subscription reminders go out this many days before the end date (reminder 1, 2 and 3).
+REMINDER_DAYS = (30, 14, 7)
+# Once a subscription has expired, owners and staff may still sign in and read, but cannot change anything.
+# These stay open because they are not school-management actions: messaging, the assistant, own password.
+LOCK_EXEMPT = ("/api/messages", "/api/chat", "/api/auth")
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def subscription_info(end: Optional[date]) -> dict:
+    """status: Active | Expiring | Expired | No expiry. reminder: 0 (none) or 1-3, rising as the end date nears."""
+    if end is None:
+        return {"status": "No expiry", "end": None, "days_left": None, "reminder": 0, "locked": False}
+    left = (end - date.today()).days
+    if left < 0:
+        return {"status": "Expired", "end": end.isoformat(), "days_left": left, "reminder": 0, "locked": True}
+    reminder = sum(1 for d in REMINDER_DAYS if left <= d)
+    return {"status": "Expiring" if reminder else "Active", "end": end.isoformat(), "days_left": left,
+            "reminder": reminder, "locked": False}
+
+
+def school_user(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> User:
+    """Any authenticated user that belongs to an active school (everyone except the superadmin).
+    After the subscription ends, owners and staff are limited to read-only; students are never affected."""
     if user.role == "superadmin" or user.school_id is None:
         raise HTTPException(403, "Not available for this account")
     school = db.get(School, user.school_id)
     if not school or not school.active:
         raise HTTPException(403, "This school account is disabled")
+    if (user.role != "student" and request.method not in SAFE_METHODS
+            and subscription_info(school.subscription_end)["locked"]
+            and not request.url.path.startswith(LOCK_EXEMPT)):
+        raise HTTPException(403, "Subscription expired. The school is read-only until the platform team renews it.")
     return user
 
 

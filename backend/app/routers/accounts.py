@@ -13,7 +13,7 @@ from ..models import School, Staff, Student, User
 from ..schemas import LoginIn, PasswordChangeIn, SchoolIn, UserIn, UserUpdateIn
 from ..security import (ALL_PERMS, PERMISSIONS, create_token, current_user, gen_password, hash_password,
                         is_locked, need, perm_set, record_failure, school_user,
-                        verify_password)
+                        subscription_info, verify_password)
 
 router = APIRouter(prefix="/api")
 log = logging.getLogger("school.admin")
@@ -25,6 +25,8 @@ def _me(user: User, db: Session) -> dict:
         "id": user.id, "username": user.username, "name": user.full_name, "role": user.role,
         "permissions": sorted(perm_set(user)), "student_id": user.student_id, "staff_id": user.staff_id,
         "school": {"id": school.id, "name": school.name} if school else None,
+        # reminders and the read-only lock apply to owners and staff only, never to students
+        "subscription": subscription_info(school.subscription_end) if school and user.role != "student" else None,
     }
 
 

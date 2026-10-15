@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import {
-  BookOpen, Building2, CalendarDays, GraduationCap, Images, Info, KeyRound, LayoutDashboard, LogOut, Menu,
+  AlertTriangle, BookOpen, Building2, CalendarDays, GraduationCap, Images, Info, KeyRound, LayoutDashboard, LogOut, Menu,
   MessagesSquare, ShieldCheck, Target, UserCircle, Users, Wallet, Camera, GraduationCap as Logo,
 } from "lucide-react";
 import { api } from "./api.js";
@@ -48,6 +48,22 @@ const NAV = [
   ["/account", "My Account", KeyRound, () => true, "Admin"],
 ];
 
+/** Pages that stay fully usable after the subscription ends (messaging and own password). */
+const KEEP_OPEN = ["/messages", "/account"];
+
+function SubscriptionBanner({ sub }) {
+  if (!sub || (!sub.locked && !sub.reminder)) return null;
+  const date = sub.end;
+  const text = sub.locked
+    ? `Subscription expired on ${date}. The school is read-only: you can sign in and view everything, but adding or changing data is switched off. Contact the platform team to renew.`
+    : `Reminder ${sub.reminder} of 3: your subscription ends on ${date} (${sub.days_left === 0 ? "today" : `${sub.days_left} day${sub.days_left === 1 ? "" : "s"} left`}). After that the school becomes read-only. Contact the platform team to renew.`;
+  return (
+    <div className={`sub-banner ${sub.locked || sub.reminder === 3 ? "bad" : "warn"}`} role="alert">
+      <AlertTriangle size={18} /> <span>{text}</span>
+    </div>
+  );
+}
+
 function Shell() {
   const auth = useAuth();
   const { session, logout, isStudent, isSuper } = auth;
@@ -56,6 +72,10 @@ function Shell() {
   const [unread, setUnread] = useState(0);
   const loc = useLocation();
   useEffect(() => setOpen(false), [loc.pathname]);
+  // pick up a renewal (or a new reminder stage) without needing to sign out and in
+  useEffect(() => {
+    if (session && !isSuper && !isStudent) auth.refresh().catch(() => {});
+  }, [loc.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (auth.can("photos.approve")) api("/photo-requests").then((r) => setPending(r.length)).catch(() => {});
   }, [loc.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -68,6 +88,7 @@ function Shell() {
   }, [session, isSuper, loc.pathname]);
   if (!session) return <Navigate to="/login" replace />;
 
+  const locked = !!session.subscription?.locked;
   const items = NAV.filter((n) => n[3](auth));
   const groups = [...new Set(items.map((n) => n[4]))];
   return (
@@ -102,7 +123,8 @@ function Shell() {
           <button className="icon-btn" onClick={() => setOpen((o) => !o)} aria-label="Menu"><Menu size={22} /></button>
           <b>{isSuper ? "Platform Console" : session.school?.name}</b>
         </div>
-        <main className="main">
+        <SubscriptionBanner sub={session.subscription} />
+        <main className={`main ${locked && !KEEP_OPEN.some((p) => loc.pathname.startsWith(p)) ? "locked" : ""}`}>
           <Suspense fallback={<div className="empty">Loading…</div>}><Outlet /></Suspense>
         </main>
       </div>

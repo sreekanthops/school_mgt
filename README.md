@@ -90,6 +90,12 @@ Edit controls (add / edit / delete) appear only where the user holds the matchin
   disable, delete), owner and staff logins (reset password, disable) and a per-school activity trail.
 - **Plan limits:** a school cannot add students or staff beyond the limits the superadmin sets (HTTP 403 with a clear message).
 - **Audit trail:** every superadmin action is recorded (who, when, what; never a password) and kept even after a school is deleted.
+- **Subscription reminders and lock:** owners and staff see a banner at 30, 14 and 7 days before the end date
+  (reminders 1, 2 and 3 of 3; the last one is red). After the end date the school becomes **read-only**: owners
+  and staff can still sign in and view everything, but every add, edit, delete, payment and marks entry is refused
+  by the server (HTTP 403) and the buttons are faded in the UI. Messaging, the assistant and changing your own
+  password stay open. **Students are never affected** and see no banner. Renewing (set a new end date) unlocks
+  at once; a school with no end date never locks. The superadmin can still manage an expired school.
 - **Data note:** the superadmin sees only counts and aggregates (no individual marks or student profiles).
 - API: `GET /api/platform/overview`, `GET/PUT /api/schools/{id}`, `/api/schools/{id}/branches`, `/api/audit`; all superadmin-only.
 
