@@ -25,6 +25,7 @@ const About = lazy(() => import("./pages/About.jsx"));
 const UsersPage = lazy(() => import("./pages/Users.jsx"));
 const Approvals = lazy(() => import("./pages/Approvals.jsx"));
 const Schools = lazy(() => import("./pages/Schools.jsx"));
+const SchoolDetail = lazy(() => import("./pages/SchoolDetail.jsx"));
 const Account = lazy(() => import("./pages/Account.jsx"));
 const Messages = lazy(() => import("./pages/Messages.jsx"));
 
@@ -138,6 +139,7 @@ export default function App() {
         <Route path="approvals" element={<Guard ok={a.can("photos.approve")}><Approvals /></Guard>} />
         <Route path="users" element={<Guard ok={a.can("users.manage")}><UsersPage /></Guard>} />
         <Route path="schools" element={<Guard ok={a.isSuper}><Schools /></Guard>} />
+        <Route path="schools/:id" element={<Guard ok={a.isSuper}><SchoolDetail /></Guard>} />
         <Route path="account" element={<Account />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

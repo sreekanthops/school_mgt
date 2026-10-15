@@ -456,3 +456,114 @@ def test_direct_message_rules(client, world):
     # message text is stored and returned as plain text (the UI renders it escaped)
     client.post(f"/api/messages/with/{tid}", headers=oh, json={"body": "<script>alert(1)</script>"})
     assert client.get(f"/api/messages/with/{oid}", headers=th).json()["messages"][-1]["body"] == "<script>alert(1)</script>"
+
+
+# ---------- superadmin console ----------
+def test_platform_routes_are_superadmin_only(client, world):
+    paths = ["/api/platform/overview", f"/api/schools/{world['a']}", f"/api/schools/{world['a']}/branches", "/api/audit"]
+    for u in ("ownerA", "teacherA", "kid1"):
+        h = login(client, u)
+        for p in paths:
+            assert client.get(p, headers=h).status_code == 403, (u, p)
+        assert client.put(f"/api/schools/{world['a']}", headers=h, json={"name": "Hacked"}).status_code == 403
+        assert client.post(f"/api/schools/{world['a']}/branches", headers=h, json={"name": "Evil"}).status_code == 403
+    assert client.get("/api/audit").status_code == 401
+
+
+def test_overview_and_school_detail(client, world):
+    h = login(client, "super")
+    o = client.get("/api/platform/overview", headers=h).json()
+    assert o["totals"]["schools"] == 2 and o["totals"]["students"] == 3
+    row = next(r for r in o["schools"] if r["id"] == world["a"])
+    assert row["students"] == 2 and row["fee_total"] == 80000 and row["fee_paid"] == 20000 and row["collection_pct"] == 25
+    assert len(o["growth"]) == 12 and sum(g["students"] for g in o["grades"]) == 3
+    d = client.get(f"/api/schools/{world['a']}", headers=h).json()
+    assert d["counts"]["students"] == 2 and d["counts"]["staff"] == 1 and d["fees"]["pending"] == 60000
+    assert d["owner"]["username"] == "ownerA" and d["usage"]["students"]["max"] == 1000
+    assert {p["username"] for p in d["people"]} >= {"ownerA", "teacherA"}
+    assert client.get("/api/schools/9999", headers=h).status_code == 404
+
+
+def test_superadmin_edits_school_details_and_audit_logged(client, world):
+    h = login(client, "super")
+    body = {"name": "School A Renamed", "city": "Pune", "board": "ICSE", "plan": "Premium", "max_students": 5,
+            "max_staff": 7, "subscription_end": "2030-01-01", "website": "https://a.example", "email": "a@a.example"}
+    r = client.put(f"/api/schools/{world['a']}", headers=h, json=body)
+    assert r.status_code == 200 and r.json()["city"] == "Pune" and r.json()["plan"] == "Premium"
+    assert r.json()["subscription_status"] == "Active"
+    assert client.put(f"/api/schools/{world['a']}", headers=h, json={**body, "plan": "Gold"}).status_code == 422
+    assert client.put(f"/api/schools/{world['a']}", headers=h, json={**body, "website": "javascript:alert(1)"}).status_code == 422
+    # an empty form keeps the plan and limits
+    r = client.put(f"/api/schools/{world['a']}", headers=h, json={"name": "School A Renamed"})
+    assert r.json()["plan"] == "Premium" and r.json()["max_students"] == 5 and r.json()["city"] is None
+    log_rows = client.get(f"/api/audit?school_id={world['a']}", headers=h).json()
+    assert any(a["action"] == "school_updated" and "plan" in a["detail"] for a in log_rows)
+
+
+def test_plan_limits_block_new_students_and_staff(client, world):
+    sh = login(client, "super")
+    client.put(f"/api/schools/{world['a']}", headers=sh, json={"name": "School A", "max_students": 2, "max_staff": 1})
+    oh = login(client, "ownerA")
+    r = client.post("/api/students", headers=oh, json=_new_student("5"))
+    assert r.status_code == 403 and "plan" in r.json()["detail"]
+    body = {"name": "Extra Teacher", "gender": "Female", "designation": "Teacher", "department": "Primary", "qualification": "B.Ed",
+            "experience_years": 1, "phone": "9999999990", "email": "n@x.com", "joined_on": "2024-06-01"}
+    assert client.post("/api/staff", headers=oh, json=body).status_code == 403
+    client.put(f"/api/schools/{world['a']}", headers=sh, json={"name": "School A", "max_students": 10, "max_staff": 10})
+    assert client.post("/api/students", headers=oh, json=_new_student("5")).status_code == 201
+
+
+def test_branches_crud_and_main_rules(client, world):
+    h = login(client, "super")
+    a = world["a"]
+    b1 = client.post(f"/api/schools/{a}/branches", headers=h, json={"name": "North Campus", "city": "Delhi"}).json()
+    assert b1["is_main"] is True  # the first branch becomes the main one
+    b2 = client.post(f"/api/schools/{a}/branches", headers=h, json={"name": "South Campus", "phone": "9999999990"}).json()
+    assert b2["is_main"] is False
+    assert client.delete(f"/api/schools/{a}/branches/{b1['id']}", headers=h).status_code == 422
+    assert client.put(f"/api/schools/{a}/branches/{b2['id']}/state", headers=h, json={"is_main": True}).json()["is_main"] is True
+    names = {x["name"]: x for x in client.get(f"/api/schools/{a}/branches", headers=h).json()}
+    assert names["North Campus"]["is_main"] is False
+    assert client.put(f"/api/schools/{a}/branches/{b2['id']}/state", headers=h, json={"active": False}).status_code == 422
+    assert client.put(f"/api/schools/{a}/branches/{b1['id']}", headers=h, json={"name": "North Renamed"}).json()["name"] == "North Renamed"
+    assert client.delete(f"/api/schools/{a}/branches/{b1['id']}", headers=h).status_code == 204
+    # a branch cannot be reached through another school's id
+    assert client.put(f"/api/schools/{world['b']}/branches/{b2['id']}", headers=h, json={"name": "Stolen"}).status_code == 404
+
+
+def test_new_school_gets_main_branch_and_details(client, world):
+    h = login(client, "super")
+    r = client.post("/api/schools", headers=h, json={"name": "Detail School", "owner_name": "Own Er", "city": "Goa",
+                                                      "plan": "Free", "max_students": 50})
+    sid = r.json()["school"]["id"]
+    d = client.get(f"/api/schools/{sid}", headers=h).json()
+    assert d["city"] == "Goa" and d["plan"] == "Free" and d["max_students"] == 50
+    assert [b["name"] for b in d["branches"]] == ["Main Campus"] and d["branches"][0]["is_main"] is True
+
+
+def test_superadmin_user_controls_scoped_to_school(client, world):
+    h = login(client, "super")
+    a = world["a"]
+    d = client.get(f"/api/schools/{a}", headers=h).json()
+    teacher = next(p for p in d["people"] if p["username"] == "teacherA")
+    r = client.put(f"/api/schools/{a}/users/{teacher['id']}/active", headers=h, json={"active": False})
+    assert r.status_code == 200
+    assert client.post("/api/auth/login", json={"username": "teacherA", "password": PW}).status_code == 401
+    r = client.post(f"/api/schools/{a}/users/{teacher['id']}/reset-password", headers=h)
+    assert r.status_code == 200 and r.json()["username"] == "teacherA" and r.json()["temp_password"]
+    # a user of another school (or the superadmin) cannot be reached through this school's route
+    assert client.put(f"/api/schools/{world['b']}/users/{teacher['id']}/active", headers=h, json={"active": False}).status_code == 404
+    me_id = client.get("/api/auth/me", headers=h).json()["id"]
+    assert client.put(f"/api/schools/{a}/users/{me_id}/active", headers=h, json={"active": False}).status_code == 404
+    acts = [x["action"] for x in client.get(f"/api/audit?school_id={a}", headers=h).json()]
+    assert "user_disabled" in acts and "user_password_reset" in acts
+    assert all("temp_password" not in str(x) for x in client.get("/api/audit", headers=h).json())
+
+
+def test_login_records_last_login_and_school_delete_keeps_audit(client, world):
+    h = login(client, "super")
+    login(client, "ownerA")
+    d = client.get(f"/api/schools/{world['a']}", headers=h).json()
+    assert d["owner"]["last_login"] and d["active_users_7d"] >= 1
+    assert client.delete(f"/api/schools/{world['b']}", headers=h).status_code == 204
+    assert any(a["action"] == "school_deleted" and a["school_name"] == "School B" for a in client.get("/api/audit", headers=h).json())

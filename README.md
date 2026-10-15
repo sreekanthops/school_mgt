@@ -30,7 +30,7 @@ Passwords are generated into `backend/.env` (git-ignored). Run `grep PASSWORD ba
 
 | Login ID | Role | What it shows |
 |---|---|---|
-| `superadmin` | Platform owner | Create/disable/delete schools, hand each owner a login |
+| `superadmin` | Platform owner | Platform Console: all schools, statistics, branches, plans and controls |
 | `12026o001` | School owner (Sunrise Public School) | Everything in that school, plus users and permissions (`ADMIN_PASSWORD`) |
 | `12026t007` | Staff (class teacher of 5-A) | View students, enter marks only (`TEACHER_PASSWORD`) |
 | `12026s05001` (any student ID) | Student | Own profile, marks, fees; subjects, staff, events, gallery; never other students' data. All demo students share `STUDENT_PASSWORD` |
@@ -54,7 +54,7 @@ ID when added; create their login in Users & Access by picking the staff profile
 
 ## Roles and permissions
 
-- **superadmin** has no school. Creates a school plus its owner (a temporary password is shown once).
+- **superadmin** has no school and sees no student-level pages. Uses the Platform Console below.
 - **admin** (school owner) holds every permission and manages users.
 - **staff** get only the permissions an admin ticks: `students.view`, `students.manage`, `marks.edit`,
   `fees.view`, `fees.manage`, `staff.manage`, `subjects.manage`, `content.manage`, `school.manage`,
@@ -78,6 +78,20 @@ Edit controls (add / edit / delete) appear only where the user holds the matchin
 | Photo approvals | Approve / reject student photo changes |
 | Assistant | Floating chat with stat cards, performance bars and action buttons (open profile, marks, fees, message the person). History is saved per user until they clear it |
 | Messages | Private person-to-person chat inside a school (owner, staff, students). Unread badge, history kept until cleared (clearing only affects your own view) |
+
+## Platform Console (superadmin)
+
+- **Console home:** totals for schools, branches, students, staff and fee collection; charts for students and
+  staff per school, schools onboarded over 12 months, fee collection, students per class and plan mix; a
+  "needs attention" list (expired or expiring subscriptions, schools at 90% of a limit, disabled schools); recent activity.
+- **School cards:** each school has buttons for Details, Edit, Branches, Owner password, Disable/Enable and Delete.
+- **School detail page:** profile (board, type, city, contact, website, private notes), plan and subscription,
+  student/staff limit usage, last activity, class-wise academics and fee charts, branches (add, edit, make main,
+  disable, delete), owner and staff logins (reset password, disable) and a per-school activity trail.
+- **Plan limits:** a school cannot add students or staff beyond the limits the superadmin sets (HTTP 403 with a clear message).
+- **Audit trail:** every superadmin action is recorded (who, when, what; never a password) and kept even after a school is deleted.
+- **Data note:** the superadmin sees only counts and aggregates (no individual marks or student profiles).
+- API: `GET /api/platform/overview`, `GET/PUT /api/schools/{id}`, `/api/schools/{id}/branches`, `/api/audit`; all superadmin-only.
 
 ## Messaging rules
 

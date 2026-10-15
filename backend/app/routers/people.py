@@ -12,7 +12,7 @@ from .. import analytics, storage
 from ..config import CURRENT_YEAR
 from ..db import get_db
 from ..deps import can_see_fees, can_see_student, get_owned, get_student, next_code, staff_letter
-from ..models import EXAM_MAX, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, Staff, Student, Subject, User
+from ..models import EXAM_MAX, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, School, Staff, Student, Subject, User
 from ..schemas import FeeIn, MarkIn, PaymentIn, StaffIn, StudentIn
 from ..security import gen_password, hash_password, need, perm_set, school_user, staff_side
 
@@ -38,6 +38,13 @@ def _staff_out(s: Staff) -> dict:
         "phone": s.phone, "email": s.email, "joined_on": s.joined_on.isoformat(), "bio": s.bio,
         "has_photo": bool(s.photo), "photo_v": storage.version(s.photo),
     }
+
+
+def _check_limit(db: Session, school_id: int, model, limit_attr: str, label: str) -> None:
+    """The plan limit the platform team set for this school."""
+    limit = getattr(db.get(School, school_id), limit_attr)
+    if db.scalar(select(func.count()).select_from(model).where(model.school_id == school_id)) >= limit:
+        raise HTTPException(403, f"Your plan allows at most {limit} {label} records. Contact the platform team to raise it.")
 
 
 # ---------- dashboard ----------
@@ -109,6 +116,7 @@ def list_students(
 @router.post("/students", status_code=201)
 def add_student(data: StudentIn, user: User = Depends(need("students.manage")), db: Session = Depends(get_db)):
     """Creates the student with an auto-generated ID and a login (ID + one-time temporary password)."""
+    _check_limit(db, user.school_id, Student, "max_students", "student")
     fields = data.model_dump(exclude={"admission_no"})
     for _ in range(3):  # retry if two requests grab the same roll number
         code = next_code(db, user.school_id, "s", data.grade)
@@ -370,6 +378,7 @@ def staff_detail(sid: int, user: User = Depends(school_user), db: Session = Depe
 @router.post("/staff", status_code=201)
 def add_staff(data: StaffIn, user: User = Depends(need("staff.manage")), db: Session = Depends(get_db)):
     """The staff ID is generated: <school><year>t<nnn>, or ...p<nnn> for the principal."""
+    _check_limit(db, user.school_id, Staff, "max_staff", "staff")
     fields = data.model_dump(exclude={"employee_id"})
     for _ in range(3):  # retry if two requests grab the same number
         s = Staff(school_id=user.school_id, employee_id=next_code(db, user.school_id, staff_letter(data.designation)),

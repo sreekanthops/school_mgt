@@ -28,6 +28,45 @@ class School(Base):
     founded: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[dt.date] = mapped_column(Date, default=dt.date.today)
+    # ---- platform-managed details (edited by the superadmin) ----
+    city: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    state: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    board: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    school_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    website: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    plan: Mapped[str] = mapped_column(String(20), default="Standard")
+    max_students: Mapped[int] = mapped_column(Integer, default=1000)
+    max_staff: Mapped[int] = mapped_column(Integer, default=100)
+    subscription_end: Mapped[Optional[dt.date]] = mapped_column(Date, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # private to the platform team
+
+
+class Branch(Base):
+    __tablename__ = "branches"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
+    name: Mapped[str] = mapped_column(String(100))
+    city: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    principal: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    is_main: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class AuditLog(Base):
+    """Superadmin actions on schools. No foreign key on purpose: the trail survives school deletion."""
+    __tablename__ = "audit_log"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[Optional[int]] = mapped_column(Integer, index=True, nullable=True)
+    school_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    actor: Mapped[str] = mapped_column(String(50))
+    action: Mapped[str] = mapped_column(String(40))
+    detail: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=lambda: dt.datetime.now(dt.timezone.utc).replace(tzinfo=None))
 
 
 class User(Base):
@@ -46,6 +85,7 @@ class User(Base):
     staff_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("staff.id", ondelete="SET NULL"), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_login: Mapped[Optional[dt.datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class Subject(Base):

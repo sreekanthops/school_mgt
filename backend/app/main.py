@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from .config import CORS_ORIGINS
 from .db import Base, engine
-from .routers import academics, accounts, messages, people
+from .routers import academics, accounts, messages, people, platform
 
 logging.basicConfig(level=logging.INFO, format='{"level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}')
 log = logging.getLogger("school")
@@ -36,6 +36,7 @@ async def unhandled(_: Request, exc: Exception):
 
 
 app.include_router(accounts.router)
+app.include_router(platform.router)
 app.include_router(people.router)
 app.include_router(academics.router)
 app.include_router(messages.router)

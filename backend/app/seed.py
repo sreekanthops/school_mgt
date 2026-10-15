@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from .config import CURRENT_YEAR, ENV_PATH
 from .db import Base, SessionLocal, engine
-from .models import (EXAMS, GRADES, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, School, Staff,
+from .models import (EXAMS, GRADES, AuditLog, Branch, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, School, Staff,
                      Student, Subject, User)
 from .deps import make_code, staff_letter
 from .security import TEACHER_DEFAULT, hash_password
@@ -100,17 +100,35 @@ def main(reset: bool):
         about="Sunrise Public School is a co-educational school from LKG to Class 10, nurturing curious, confident and responsible learners.",
         mission="To deliver joyful, rigorous and inclusive education that prepares every child for the future.",
         vision="A school where technology and teachers together unlock every student's potential.",
-        address="12 Education Avenue, Hyderabad, Telangana.", contact="office@school.example | +91 40 0000 0000")
+        address="12 Education Avenue, Hyderabad, Telangana.", contact="office@school.example | +91 40 0000 0000",
+        city="Hyderabad", state="Telangana", board="CBSE", school_type="Co-educational", email="office@school.example",
+        phone="+91 40 0000 0000", website="https://sunrise.example", plan="Premium", max_students=500, max_staff=60,
+        subscription_end=date.today() + timedelta(days=210), notes="Pilot school. Onboarded by the platform team.")
     db.add(school)
     db.flush()
     sid = school.id
+    db.add_all([
+        Branch(school_id=sid, name="Main Campus", city="Hyderabad", address="12 Education Avenue", phone="+91 40 0000 0000",
+               email="office@school.example", principal="Dr. Meera Rao", is_main=True),
+        Branch(school_id=sid, name="Banjara Hills Branch", city="Hyderabad", address="8 Road No. 12, Banjara Hills",
+               phone="+91 40 0000 0001", email="banjara@school.example", principal="Mr. Suresh Kumar"),
+        Branch(school_id=sid, name="Secunderabad Branch", city="Secunderabad", address="22 Park Lane",
+               phone="+91 40 0000 0002", email="secunderabad@school.example", principal="Mrs. Anita Sharma"),
+    ])
     db.add(User(school_id=sid, username=make_code(sid, "o", 1), password_hash=hash_password(pw["ADMIN_PASSWORD"]),
                 role="admin", full_name="School Owner"))
 
     # ---- empty second school (shows tenant isolation); created after the demo school so ids are 1 and 2 ----
-    school2 = School(name="Greenfield Academy")
+    school2 = School(name="Greenfield Academy", city="Vijayawada", state="Andhra Pradesh", board="State Board",
+                     school_type="Co-educational", plan="Standard", max_students=300, max_staff=30,
+                     subscription_end=date.today() + timedelta(days=12), founded="2024")
     db.add(school2)
     db.flush()
+    db.add(Branch(school_id=school2.id, name="Main Campus", city="Vijayawada", is_main=True))
+    db.add_all([AuditLog(school_id=school.id, school_name=school.name, actor="superadmin", action="school_created",
+                         detail="Seeded demo school"),
+                AuditLog(school_id=school2.id, school_name=school2.name, actor="superadmin", action="school_created",
+                         detail="Seeded empty school")])
     db.add(User(school_id=school2.id, username=make_code(school2.id, "o", 1), password_hash=hash_password(pw["OWNER2_PASSWORD"]),
                 role="admin", full_name="Greenfield Owner"))
 

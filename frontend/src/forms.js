@@ -29,3 +29,30 @@ export const staffFields = [
   { key: "joined_on", label: "Joined on", type: "date", required: true },
   { key: "bio", label: "About", type: "textarea", full: true },
 ];
+
+export const schoolFields = [
+  { key: "name", label: "School name", required: true, full: true },
+  { key: "city", label: "City" },
+  { key: "state", label: "State" },
+  { key: "board", label: "Board", type: "select", options: ["", "CBSE", "ICSE", "State Board", "IB", "Cambridge (IGCSE)", "Other"] },
+  { key: "school_type", label: "Type", type: "select", options: ["", "Co-educational", "Boys", "Girls"] },
+  { key: "founded", label: "Founded (year)" },
+  { key: "email", label: "Email", type: "email" },
+  { key: "phone", label: "Phone" },
+  { key: "website", label: "Website (https://…)" },
+  { key: "address", label: "Address", full: true },
+  { key: "plan", label: "Plan", type: "select", options: ["Free", "Standard", "Premium"], default: "Standard" },
+  { key: "max_students", label: "Student limit", type: "number", min: 1, max: 1000000, default: 1000 },
+  { key: "max_staff", label: "Staff limit", type: "number", min: 1, max: 100000, default: 100 },
+  { key: "subscription_end", label: "Subscription ends", type: "date" },
+  { key: "notes", label: "Private notes (platform team only)", type: "textarea", full: true },
+];
+
+export const branchFields = [
+  { key: "name", label: "Branch name", required: true, full: true },
+  { key: "city", label: "City" },
+  { key: "principal", label: "Branch principal" },
+  { key: "phone", label: "Phone" },
+  { key: "email", label: "Email", type: "email" },
+  { key: "address", label: "Address", full: true },
+];

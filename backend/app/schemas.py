@@ -30,9 +30,51 @@ class SchoolIn(BaseModel):
     founded: Optional[str] = Field(default=None, max_length=10)
 
 
-class NewSchoolIn(BaseModel):
+PLANS = ("Free", "Standard", "Premium")
+
+
+class SchoolAdminIn(BaseModel):
+    """Details the platform superadmin manages for a school."""
     name: str = Field(min_length=2, max_length=120)
+    city: Optional[str] = Field(default=None, max_length=80)
+    state: Optional[str] = Field(default=None, max_length=80)
+    board: Optional[str] = Field(default=None, max_length=40)
+    school_type: Optional[str] = Field(default=None, max_length=40)
+    email: Optional[str] = Field(default=None, max_length=120, pattern=EMAIL)
+    phone: Optional[str] = Field(default=None, pattern=PHONE)
+    website: Optional[str] = Field(default=None, max_length=200, pattern=r"^https?://\S+$")
+    address: Optional[str] = Field(default=None, max_length=300)
+    founded: Optional[str] = Field(default=None, max_length=10)
+    plan: Optional[str] = None
+    max_students: Optional[int] = Field(default=None, ge=1, le=1_000_000)
+    max_staff: Optional[int] = Field(default=None, ge=1, le=100_000)
+    subscription_end: Optional[date] = None
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("plan")
+    @classmethod
+    def _plan(cls, v):
+        if v is not None and v not in PLANS:
+            raise ValueError("invalid plan")
+        return v
+
+
+class NewSchoolIn(SchoolAdminIn):
     owner_name: str = Field(min_length=2, max_length=100)
+
+
+class BranchIn(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    city: Optional[str] = Field(default=None, max_length=80)
+    address: Optional[str] = Field(default=None, max_length=300)
+    phone: Optional[str] = Field(default=None, pattern=PHONE)
+    email: Optional[str] = Field(default=None, max_length=120, pattern=EMAIL)
+    principal: Optional[str] = Field(default=None, max_length=100)
+
+
+class BranchStateIn(BaseModel):
+    active: Optional[bool] = None
+    is_main: Optional[bool] = None
 
 
 class UserIn(BaseModel):

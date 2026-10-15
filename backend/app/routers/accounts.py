@@ -1,19 +1,18 @@
 """Auth, school profile, superadmin school management, and user/permission management."""
 import logging
-from typing import Optional
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import storage
 from ..db import get_db
-from ..deps import make_code, next_code
+from ..deps import next_code
 from ..models import School, Staff, Student, User
-from ..schemas import LoginIn, NewSchoolIn, PasswordChangeIn, SchoolIn, UserIn, UserUpdateIn
+from ..schemas import LoginIn, PasswordChangeIn, SchoolIn, UserIn, UserUpdateIn
 from ..security import (ALL_PERMS, PERMISSIONS, create_token, current_user, gen_password, hash_password,
-                        is_locked, need, perm_set, record_failure, school_user, superadmin_only,
+                        is_locked, need, perm_set, record_failure, school_user,
                         verify_password)
 
 router = APIRouter(prefix="/api")
@@ -43,6 +42,8 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
     if not ok:
         record_failure(data.username)
         raise HTTPException(401, "Invalid username or password")
+    user.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
+    db.commit()
     return {"token": create_token(user), **_me(user, db)}
 
 
@@ -82,57 +83,6 @@ def update_school(data: SchoolIn, user: User = Depends(need("school.manage")), d
         setattr(s, k, v)
     db.commit()
     return _school_out(s)
-
-
-# ---------- superadmin: schools ----------
-@router.get("/schools")
-def list_schools(_: User = Depends(superadmin_only), db: Session = Depends(get_db)):
-    out = []
-    for s in db.scalars(select(School).order_by(School.id)):
-        owner = db.scalar(select(User).where(User.school_id == s.id, User.role == "admin").order_by(User.id))
-        out.append({
-            "id": s.id, "name": s.name, "active": s.active, "created_at": s.created_at.isoformat(),
-            "students": db.scalar(select(func.count()).select_from(Student).where(Student.school_id == s.id)),
-            "staff": db.scalar(select(func.count()).select_from(Staff).where(Staff.school_id == s.id)),
-            "users": db.scalar(select(func.count()).select_from(User).where(User.school_id == s.id)),
-            "owner": {"id": owner.id, "name": owner.full_name, "username": owner.username} if owner else None,
-        })
-    return out
-
-
-@router.post("/schools", status_code=201)
-def create_school(data: NewSchoolIn, sa: User = Depends(superadmin_only), db: Session = Depends(get_db)):
-    school = School(name=data.name)
-    db.add(school)
-    db.flush()
-    pw = gen_password()
-    owner = User(school_id=school.id, username=make_code(school.id, "o", 1), password_hash=hash_password(pw),
-                 role="admin", full_name=data.owner_name)
-    db.add(owner)
-    db.commit()
-    log.info("school_created", extra={"school_id": school.id, "by": sa.id})
-    return {"school": {"id": school.id, "name": school.name},
-            "owner": {"username": owner.username, "temp_password": pw}}
-
-
-@router.put("/schools/{school_id}/active")
-def set_school_active(school_id: int, body: dict, _: User = Depends(superadmin_only), db: Session = Depends(get_db)):
-    s = db.get(School, school_id)
-    if not s:
-        raise HTTPException(404, "Not found")
-    s.active = bool(body.get("active"))
-    db.commit()
-    return {"id": s.id, "active": s.active}
-
-
-@router.delete("/schools/{school_id}", status_code=204)
-def delete_school(school_id: int, _: User = Depends(superadmin_only), db: Session = Depends(get_db)):
-    s = db.get(School, school_id)
-    if not s:
-        raise HTTPException(404, "Not found")
-    db.delete(s)
-    db.commit()
-    storage.remove_school(school_id)
 
 
 # ---------- users & permissions (tenant) ----------
@@ -239,16 +189,3 @@ def delete_user(uid: int, actor: User = Depends(need("users.manage")), db: Sessi
         raise HTTPException(422, "You cannot delete yourself")
     db.delete(u)
     db.commit()
-
-
-# superadmin: reset an owner's password
-@router.post("/schools/{school_id}/owner/reset-password")
-def reset_owner_password(school_id: int, _: User = Depends(superadmin_only), db: Session = Depends(get_db)):
-    owner: Optional[User] = db.scalar(
-        select(User).where(User.school_id == school_id, User.role == "admin").order_by(User.id))
-    if not owner:
-        raise HTTPException(404, "Not found")
-    pw = gen_password()
-    owner.password_hash = hash_password(pw)
-    db.commit()
-    return {"username": owner.username, "temp_password": pw}
