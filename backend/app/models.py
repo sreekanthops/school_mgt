@@ -1,7 +1,8 @@
 import datetime as dt
 from typing import Optional
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text,
+                        UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -129,6 +130,7 @@ class Student(Base):
     address: Mapped[Optional[str]] = mapped_column(String(250), nullable=True)
     blood_group: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
     photo: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    legacy_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)  # the id the school used before (smart import)
     pending_photo: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
 
@@ -183,6 +185,7 @@ class Staff(Base):
     joined_on: Mapped[dt.date] = mapped_column(Date)
     bio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     photo: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    legacy_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
 
 
 class Event(Base):
@@ -329,3 +332,28 @@ class Invoice(Base):
     mode: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     reference: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
     note: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+
+
+class ImportJob(Base):
+    """An uploaded file waiting to be reviewed (smart import). Holds the school's raw file only until the import
+    is confirmed or cancelled, or for 24 hours at most."""
+    __tablename__ = "import_jobs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    filename: Mapped[str] = mapped_column(String(120))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+
+
+class ImportBatch(Base):
+    """What a confirmed smart import created, so it can be undone. `created` maps a table name to the ids added."""
+    __tablename__ = "import_batches"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
+    user_name: Mapped[str] = mapped_column(String(50))
+    filename: Mapped[str] = mapped_column(String(120))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+    summary: Mapped[dict] = mapped_column(JSON)
+    created: Mapped[dict] = mapped_column(JSON)
+    undone: Mapped[bool] = mapped_column(Boolean, default=False)

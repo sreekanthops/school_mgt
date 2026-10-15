@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import {
-  AlertTriangle, BookOpen, Building2, CalendarCheck, Megaphone, Receipt, Lightbulb, CalendarDays, GraduationCap, Images, Info, KeyRound, LayoutDashboard, LogOut, Menu,
+  AlertTriangle, BookOpen, Building2, CalendarCheck, FileUp, Megaphone, Receipt, Lightbulb, CalendarDays, GraduationCap, Images, Info, KeyRound, LayoutDashboard, LogOut, Menu,
   MessagesSquare, ShieldCheck, Target, UserCircle, Users, Wallet, Camera, GraduationCap as Logo,
 } from "lucide-react";
 import { api } from "./api.js";
@@ -33,6 +33,7 @@ const Board = lazy(() => import("./pages/Board.jsx"));
 const Announcements = lazy(() => import("./pages/Announcements.jsx"));
 const Attendance = lazy(() => import("./pages/Attendance.jsx"));
 const NewYear = lazy(() => import("./pages/NewYear.jsx"));
+const SmartImport = lazy(() => import("./pages/SmartImport.jsx"));
 const MyBilling = lazy(() => import("./components/Billing.jsx").then((m) => ({ default: m.MyBilling })));
 
 /** [path, label, icon, visible(auth) , group] */
@@ -51,6 +52,7 @@ const NAV = [
   ["/gallery", "Gallery", Images, (a) => !a.isSuper, "Campus"],
   ["/goals", "Future Goals", Target, (a) => !a.isSuper, "Campus"],
   ["/about", "About School", Info, (a) => !a.isSuper, "Campus"],
+  ["/import", "Smart Import", FileUp, (a) => a.can("students.manage") || a.can("staff.manage") || a.can("fees.manage") || a.can("subjects.manage") || a.can("content.manage") || a.can("marks.edit"), "Admin"],
   ["/approvals", "Photo Approvals", Camera, (a) => a.can("photos.approve"), "Admin"],
   ["/users", "Users & Access", ShieldCheck, (a) => a.can("users.manage"), "Admin"],
   ["/billing", "Billing", Receipt, (a) => a.role === "admin", "Admin"],
@@ -174,6 +176,7 @@ export default function App() {
         <Route path="announcements" element={<Guard ok={!a.isSuper}><Announcements /></Guard>} />
         <Route path="attendance" element={<Guard ok={a.can("attendance.manage") || a.can("students.view")}><Attendance /></Guard>} />
         <Route path="new-year" element={<Guard ok={a.can("school.manage") && a.can("students.manage")}><NewYear /></Guard>} />
+        <Route path="import" element={<Guard ok={a.can("students.manage") || a.can("staff.manage") || a.can("fees.manage") || a.can("subjects.manage") || a.can("content.manage") || a.can("marks.edit")}><SmartImport /></Guard>} />
         <Route path="billing" element={<Guard ok={a.role === "admin"}><MyBilling /></Guard>} />
         <Route path="board" element={<Guard ok={!a.isSuper}><Board /></Guard>} />
         <Route path="events" element={<Guard ok={!a.isSuper}><Events /></Guard>} />

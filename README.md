@@ -177,6 +177,40 @@ invoice period, so the expired/reminder state clears by itself. Invoices have a 
 trail, and invoices are kept even if the school is deleted. The owner has a read-only **Billing** page for their own
 school's invoices; staff and students cannot see billing.
 
+## Smart import (existing school data)
+
+**Smart Import** (Admin menu) loads a school's existing records from one file: Excel (`.xlsx`, every sheet), CSV, JSON
+(flat, nested or keyed by ID) or a Word (`.docx`) table. It handles students, staff, subjects, marks, fees, fee payments,
+events and goals, in any order within one file.
+
+1. **Upload.** Each sheet is read, titles above the table are skipped, and the sheet is classified and its columns
+   mapped by rules (headings such as "Pupil Name", "Adm No", "Unit Test 1", "Father Name", "6A" are understood).
+2. **Review.** You can correct what each sheet is, and which column is which. Nothing has been written yet.
+3. **Check.** A dry run (the same code as the real run, then rolled back) reports per sheet: new / already there /
+   updated / skipped, every problem with its row number, differences from what the system holds, and plan-limit blockers.
+4. **Confirm.** Only possible with zero problems; all-or-nothing in one transaction.
+5. **Undo.** Every confirmed import is recorded; undo within 7 days removes what it created (and restores values it updated,
+   if nobody has edited them since).
+
+No duplicates or overlap: students match on the old ID, or on name + date of birth + class; staff on old ID, or name +
+phone, or name + email; marks on student + subject + exam + year; fees on student + year; events on title + date.
+Importing the same file twice changes nothing. Marks and fees find students by old/admission ID, or by name (+ class and
+section if two share a name; ambiguous names are reported, never guessed). A fee sheet's "paid" column records only the
+difference from what the system already holds. Marks out of a different maximum are scaled; blank/absent marks are skipped.
+If the file and the system disagree, the system's value is kept unless you choose "use the file's value".
+
+Safety: passwords are never imported (new students and staff get a one-time password and must change it); permissions are
+capped at the importer's own; each sheet needs the matching permission (`students.manage`, `staff.manage`, `marks.edit`,
+`fees.manage`, `subjects.manage`, `content.manage`); the plan's student and staff limits are enforced; uploads are limited
+to 5 MB / 5,000 rows per sheet, macro-enabled and old binary Office files and files with XML entity tricks are refused;
+the uploaded file is kept only until confirm/cancel, or 24 hours at most; the whole feature is read-only while a
+subscription has expired.
+
+**Optional AI help.** If `LLM_BASE_URL` (https only), `LLM_API_KEY` and `LLM_MODEL` are set, sheets the rules could not map are
+sent to the model for a suggestion. **Only the sheet name and column headings are sent, never any row of data**, and the
+answer is validated (only known fields and real headings are accepted) and shown for you to correct. Without it, everything
+still works by rules.
+
 ## Messaging rules
 
 Owners and staff can message anyone in their school. Students can message staff and the owner, never
