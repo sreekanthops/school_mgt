@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import DATABASE_URL
@@ -29,3 +29,18 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def add_missing_columns() -> None:
+    """create_all never alters existing tables. So that a database made by an older version keeps working,
+    add any nullable column the models have but the table lacks. Only nullable columns are handled on purpose."""
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in have and col.nullable:
+                    ddl = col.type.compile(dialect=engine.dialect)
+                    conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl}'))

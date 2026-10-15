@@ -88,6 +88,17 @@ export default function Dashboard() {
                 {seeFees && <List title="Highest fee dues" items={d.top_defaulters} render={(s) => <Badge kind="warn">{inr(s.pending)}</Badge>} empty="No pending dues." />}
               </div>
             )}
+            {d.attendance_alerts?.length > 0 && (
+              <div className="card" style={{ marginTop: 16 }}>
+                <div className="row" style={{ justifyContent: "space-between" }}><h2>Low attendance</h2><Link to="/attendance">Attendance</Link></div>
+                {d.attendance_alerts.map((s) => (
+                  <div key={s.id} className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+                    <Link to={`/students/${s.id}?tab=attendance`}>{s.name}<div className="small muted">{gradeLabel(s.grade)}-{s.section}</div></Link>
+                    <Badge kind="bad">{s.pct}% · {s.absent} absent</Badge>
+                  </div>
+                ))}
+              </div>
+            )}
             {c.students === 0 && (
               <div className="card" style={{ marginTop: 16 }}>
                 <h2>Welcome! Your school is empty.</h2>

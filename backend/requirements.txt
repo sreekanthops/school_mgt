@@ -6,3 +6,5 @@ PyJWT
 bcrypt
 httpx
 python-dotenv
+reportlab
+python-calamine

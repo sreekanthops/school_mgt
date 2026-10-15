@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Search } from "lucide-react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { GraduationCap, Plus, Search, Upload } from "lucide-react";
 import { api, GRADES, gradeLabel, inr } from "../api.js";
 import { useAuth } from "../auth.jsx";
 import { SECTIONS, studentFields } from "../forms.js";
-import { Async, Badge, FormModal, PageHead, Photo, Secret, tone, useLoad } from "../components/ui.jsx";
+import ImportStudents from "../components/ImportStudents.jsx";
+import { Async, Badge, DownloadButton, FormModal, PageHead, Photo, Secret, tone, useLoad } from "../components/ui.jsx";
 
 export default function Students() {
   const nav = useNavigate();
@@ -15,6 +16,7 @@ export default function Students() {
   const [section, setSection] = useState("");
   const [page, setPage] = useState(1);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [secret, setSecret] = useState(null);
   const [tick, setTick] = useState(0);
   const params = new URLSearchParams({ page, page_size: 12 });
@@ -26,8 +28,13 @@ export default function Students() {
   return (
     <>
       <PageHead title="Students" sub="Click a student to open their full profile">
+        {can("students.view") && <DownloadButton path={`/export/students?format=csv${grade ? `&grade=${grade}` : ""}${section ? `&section=${section}` : ""}`} label="Export CSV" />}
+        {can("students.view") && <DownloadButton path={`/export/students?format=pdf${grade ? `&grade=${grade}` : ""}${section ? `&section=${section}` : ""}`} label="PDF" />}
+        {can("students.manage") && <button className="btn ghost" onClick={() => setImporting(true)}><Upload size={16} /> Import</button>}
+        {can("students.manage") && can("school.manage") && <Link className="btn ghost" to="/new-year"><GraduationCap size={16} /> New year</Link>}
         {can("students.manage") && <button className="btn" onClick={() => setAdding(true)}><Plus size={16} /> Add student</button>}
       </PageHead>
+      {importing && <ImportStudents onClose={() => setImporting(false)} onDone={() => setTick((t) => t + 1)} />}
       {adding && (
         <FormModal title="Add student" fields={studentFields} onClose={() => setAdding(false)}
           onSubmit={async (b) => {

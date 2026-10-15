@@ -58,7 +58,7 @@ ID when added; create their login in Users & Access by picking the staff profile
 - **admin** (school owner) holds every permission and manages users.
 - **staff** get only the permissions an admin ticks: `students.view`, `students.manage`, `marks.edit`,
   `fees.view`, `fees.manage`, `staff.manage`, `subjects.manage`, `content.manage`, `school.manage`,
-  `photos.approve`, `users.manage` (admin-only to grant). Nobody can grant a permission they lack.
+  `photos.approve`, `attendance.manage`, `announcements.manage`, `users.manage` (admin-only to grant). Nobody can grant a permission they lack.
 - **student** sees only their own record. Their new profile photo waits for approval before it shows.
 
 Edit controls (add / edit / delete) appear only where the user holds the matching permission.
@@ -123,6 +123,59 @@ Edit controls (add / edit / delete) appear only where the user holds the matchin
 3. **Still stuck?** The school admin / IT department (anyone with `users.manage`; the superadmin for an owner) issues
    a **temporary password** from Users & Access → key icon. It is shared in person (the user contacts the office),
    works for sign-in only, and the user is forced to choose their own password before anything else.
+
+## Announcements
+
+The owner (or anyone with `announcements.manage`) posts notices to **everyone, staff only, students only, or one class**.
+People only ever receive the notices meant for them (a student sees "everyone", "students" and their own class).
+Posts can be pinned. The sidebar shows an unread count; opening the page marks them read. Text is stored and shown
+as plain text, never HTML. The assistant answers "any announcements?".
+
+## Exports (CSV and PDF)
+
+Students, marks summary, fee register (filter by class/status), attendance report, **report card** (one student, PDF)
+and **fee receipt** (one payment, PDF). Needs `students.view` (lists) or `fees.view`/`fees.manage` (fees); a student can
+download only their own report card and receipts. CSV text that starts with `= + - @` is prefixed with `'` so a
+spreadsheet cannot run it as a formula. Downloads are reads, so they keep working when a subscription has expired.
+
+## Bulk actions
+
+- **Import students** (Students → Import): CSV or Excel `.xlsx`, up to 300 rows / 2 MB. Download the template first.
+  Class can be written `5`, `Class 5`, `5th`, `LKG`; dates as `2014-06-21` or `21/06/2014`. The file is **checked first
+  (dry run) and nothing is saved until every row is valid**; duplicates (same name, birth date and class) are flagged.
+  Each student gets an ID/login and a one-time password that must be changed at first sign-in; the list is shown once
+  and can be downloaded. The plan's student limit is enforced.
+- **New academic year** (Students → New year, needs `school.manage` + `students.manage`): moves every student up one
+  class, lets you tick students to **hold back**, and optionally removes Class 10 leavers. IDs and logins do not change;
+  last year's marks and fees stay and are selectable by year. It can only run once per year (a second click is refused).
+  The school's current year is stored per school (`schools.academic_year`; `CURRENT_ACADEMIC_YEAR` is the default).
+- **Set fee for a class** (Fees page).
+
+## Staff logins
+
+Adding a staff member now also creates their login (login = staff ID, one-time password, forced change at first
+sign-in) with standard teacher permissions (`students.view`, `marks.edit`, `attendance.manage`; the principal also gets
+`fees.view` and `announcements.manage`). You can never give a new login more than you hold yourself, and you can
+untick "create login" with `?create_login=false`. Deleting a staff member deletes their login.
+
+## Attendance
+
+Teachers (`attendance.manage`) mark a class and date as Present / Late / Absent (Late counts as attended); saving again
+edits the day. No future dates, and nothing older than 90 days. Reports by class and date range with a daily trend,
+a per-student attendance tab (with month-by-month chart), and **alerts**: under 75% over the last 30 days (once at least
+5 days are recorded) or absent 3 school days in a row. Alerts show on the Dashboard and the assistant answers
+"who has low attendance?" / "what is my attendance?" (students only for themselves).
+
+## Billing (Platform Console)
+
+Superadmin → Schools → **Billing & renewals** (and a Billing tab on each school): invoice list with status
+(Pending / Overdue / Paid / Cancelled), collected / awaiting / overdue totals, a monthly chart and a **renewal tracker**
+(nearest end date first, with a button to raise an invoice). An invoice defaults to the plan price (Free 0, Standard
+24,000, Premium 60,000 per year) plus 18% tax, starting the day after the current subscription ends; all of that can be
+overridden. **Mark paid** records mode and reference and moves the school's subscription end date to the end of the
+invoice period, so the expired/reminder state clears by itself. Invoices have a PDF. Every step goes in the audit
+trail, and invoices are kept even if the school is deleted. The owner has a read-only **Billing** page for their own
+school's invoices; staff and students cannot see billing.
 
 ## Messaging rules
 

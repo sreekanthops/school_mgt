@@ -36,9 +36,12 @@ PERMISSIONS = {
     "school.manage": "Edit school profile",
     "photos.approve": "Approve student photo requests",
     "users.manage": "Create users and set their permissions",
+    "attendance.manage": "Mark attendance and see attendance reports",
+    "announcements.manage": "Post and manage school announcements",
 }
 ALL_PERMS = set(PERMISSIONS)
-TEACHER_DEFAULT = ["students.view", "marks.edit"]
+TEACHER_DEFAULT = ["students.view", "marks.edit", "attendance.manage"]
+PRINCIPAL_DEFAULT = TEACHER_DEFAULT + ["fees.view", "announcements.manage"]
 
 
 def perm_set(user: User) -> set:
@@ -50,8 +53,9 @@ def perm_set(user: User) -> set:
     return set()
 
 
-def hash_password(pw: str) -> str:
-    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+def hash_password(pw: str, rounds: int = 12) -> str:
+    """`rounds` is only lowered for bulk-issued one-time passwords (see people.import_students)."""
+    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt(rounds)).decode()
 
 
 def verify_password(pw: str, hashed: str) -> bool:
@@ -62,7 +66,11 @@ def verify_password(pw: str, hashed: str) -> bool:
 
 
 def gen_password() -> str:
-    return secrets.token_urlsafe(9)
+    """One-time password. Never starts with - or _, so it stays exact when listed in a spreadsheet."""
+    while True:
+        pw = secrets.token_urlsafe(9)
+        if pw[0].isalnum():
+            return pw
 
 
 def is_locked(username: str, limit: int = MAX_FAILS) -> bool:
@@ -117,7 +125,7 @@ def current_user(
 REMINDER_DAYS = (30, 14, 7)
 # Once a subscription has expired, owners and staff may still sign in and read, but cannot change anything.
 # These stay open because they are not school-management actions: messaging, the assistant, own password.
-LOCK_EXEMPT = ("/api/messages", "/api/chat", "/api/auth")
+LOCK_EXEMPT = ("/api/messages", "/api/chat", "/api/auth", "/api/announcements/read")
 SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 
 

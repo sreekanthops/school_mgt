@@ -254,9 +254,9 @@ def test_staff_gets_generated_id_and_login_name(client, world):
     h = login(client, "ownerA")
     body = {"employee_id": "HACK", "name": "New Teacher", "gender": "Female", "designation": "Teacher", "department": "Primary",
             "qualification": "M.Ed", "experience_years": 3, "phone": "9999999990", "email": "n@x.com", "joined_on": "2024-06-01"}
-    t1 = client.post("/api/staff", headers=h, json=body)
-    t2 = client.post("/api/staff", headers=h, json={**body, "name": "Second Teacher"})
-    p = client.post("/api/staff", headers=h, json={**body, "name": "Head Person", "designation": "Principal"})
+    t1 = client.post("/api/staff?create_login=false", headers=h, json=body)
+    t2 = client.post("/api/staff?create_login=false", headers=h, json={**body, "name": "Second Teacher"})
+    p = client.post("/api/staff?create_login=false", headers=h, json={**body, "name": "Head Person", "designation": "Principal"})
     # client-supplied employee_id is ignored; ids are school+year+letter+number
     assert t1.json()["employee_id"] == f"{a}{y}t001"
     assert t2.json()["employee_id"] == f"{a}{y}t002"
@@ -264,7 +264,7 @@ def test_staff_gets_generated_id_and_login_name(client, world):
     # the employee_id cannot be changed on update
     u = client.put(f"/api/staff/{t1.json()['id']}", headers=h, json={**body, "employee_id": "X1", "name": "Renamed"})
     assert u.json()["employee_id"] == f"{a}{y}t001"
-    # a staff login linked to a profile uses the staff ID as login name
+    # a staff login created by hand for a profile uses the staff ID as login name (here auto-creation was switched off)
     r = client.post("/api/users", headers=h, json={"username": "ignored", "full_name": "New Teacher", "role": "staff",
                                                     "staff_id": t1.json()["id"], "permissions": ["students.view"]})
     assert r.status_code == 201 and r.json()["username"] == f"{a}{y}t001"

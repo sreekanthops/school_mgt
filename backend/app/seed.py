@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from .config import CURRENT_YEAR, ENV_PATH
 from .db import Base, SessionLocal, engine
-from .models import (EXAMS, GRADES, AuditLog, BoardNote, BoardVote, Branch, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, School, Staff,
+from .models import (EXAMS, GRADES, Announcement, Attendance, AuditLog, BoardNote, Invoice, BoardVote, Branch, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, School, Staff,
                      Student, Subject, User)
 from .deps import make_code, staff_letter
 from .security import TEACHER_DEFAULT, hash_password
@@ -284,6 +284,45 @@ def main(reset: bool):
         db.flush()
         db.add_all(BoardVote(note_id=n.id, voter_key=f"demo-{i}-{k}", value="agree" if k < yes else "disagree") for k in range(yes + no))
     db.add_all(Goal(school_id=sid, title=a, description=b, target_year=c, progress=d, status=e) for a, b, c, d, e in goals)
+
+    # ---- announcements ----
+    owner = db.scalar(select(User).where(User.school_id == sid, User.role == "admin"))
+    notices = [
+        ("Parent-Teacher Meeting this week", "Term progress will be shared with parents. Please carry the student diary.", "all", None, True, 5),
+        ("Staff meeting on Friday", "All teachers to meet in the staff room at 3:30 pm to plan the Science Exhibition.", "staff", None, False, 30),
+        ("Library books due", "Students, please return borrowed library books before the end of the month.", "students", None, False, 52),
+        ("Class 10 board exam orientation", "Orientation for Class 10 students and parents on Monday at 10 am in the auditorium.", "class", "10", False, 70),
+    ]
+    for title, body, aud, gr, pin, hrs in notices:
+        db.add(Announcement(school_id=sid, title=title, body=body, audience=aud, grade=gr, pinned=pin,
+                            author_name=owner.full_name, created_at=date_time_ago(hrs)))
+
+    # ---- attendance: last 35 days, weekdays only; a few students with low attendance or a running absence ----
+    low = {s.id: 0.55 + 0.05 * (i % 4) for i, s in enumerate(students) if i % 17 == 3}
+    away = {s.id for i, s in enumerate(students) if i % 29 == 5}
+    day, att = today, []
+    for _n in range(35):
+        if day.weekday() < 5:
+            for st in students:
+                if st.id in away and (today - day).days <= 3:
+                    status = "A"
+                else:
+                    r = random.random()
+                    status = "A" if r > low.get(st.id, 0.95) else ("L" if r < 0.03 else "P")
+                att.append(Attendance(school_id=sid, student_id=st.id, day=day, status=status, marked_by=t.employee_id))
+        day -= timedelta(days=1)
+    db.add_all(att)
+
+    # ---- billing: one paid, one overdue, one open renewal ----
+    def inv(school_, n, status_, start, end, issued, due, paid=None):
+        amt = {"Free": 0, "Standard": 24000, "Premium": 60000}[school_.plan]
+        i = Invoice(number=f"INV-{issued.year}-{n:05d}", school_id=school_.id, school_name=school_.name, plan=school_.plan,
+                    period_start=start, period_end=end, amount=amt, tax=round(amt * 0.18, 2), total=round(amt * 1.18, 2),
+                    status=status_, issued_on=issued, due_on=due, paid_on=paid, mode="Bank Transfer" if paid else None,
+                    reference=f"NEFT{n:06d}" if paid else None)
+        db.add(i)
+    inv(school, 1, "Paid", today - timedelta(days=155), today + timedelta(days=210), today - timedelta(days=160), today - timedelta(days=145), today - timedelta(days=150))
+    inv(school2, 2, "Pending", today + timedelta(days=13), today + timedelta(days=377), today - timedelta(days=10), today - timedelta(days=2))
     db.commit()
     print(f"Seeded {len(students)} students, {len(staff_rows)} staff in 'Sunrise Public School' + empty 'Greenfield Academy'.")
     demo = next(s for s in students if s.grade == "5" and s.section == "A")

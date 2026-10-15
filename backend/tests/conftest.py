@@ -61,7 +61,7 @@ def world():
     _user(db, username="super", role="superadmin", full_name="Super")
     _user(db, school_id=a.id, username="ownerA", role="admin", full_name="Owner A")
     _user(db, school_id=b.id, username="ownerB", role="admin", full_name="Owner B")
-    _user(db, school_id=a.id, username="teacherA", role="staff", full_name="Teacher A", permissions="students.view,marks.edit")
+    _user(db, school_id=a.id, username="teacherA", role="staff", full_name="Teacher A", permissions="students.view,marks.edit,attendance.manage")
     _user(db, school_id=a.id, username="plainA", role="staff", full_name="Plain Staff", permissions="")
     _user(db, school_id=a.id, username="kid1", role="student", full_name="Asha Rao", student_id=s1.id)
     db.commit()

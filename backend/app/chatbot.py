@@ -6,15 +6,17 @@ phrase a friendlier reply; the grounded answer is the fallback.
 """
 import logging
 import re
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from . import analytics
-from .config import CURRENT_YEAR, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
-from .models import AssistantMessage, Chapter, Event, Goal, School, Staff, Student, Subject, User
+from .config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from .deps import year_of
+from .models import Announcement, Attendance, AssistantMessage, Chapter, Event, Goal, School, Staff, Student, Subject, User
+from .routers import announcements, attendance
 from .security import perm_set
 
 log = logging.getLogger("school.chatbot")
@@ -29,8 +31,9 @@ SUGGESTIONS = [
     "What are the chapters of Mathematics in class 5?",
     "What are our future goals?",
 ]
-STAFF_SUGGESTIONS = SUGGESTIONS + ["Which students have pending fees?", "Who are the top performers?"]
-STUDENT_SUGGESTIONS = ["How are my marks?", "What is my fee status?"] + SUGGESTIONS[:4]
+STAFF_SUGGESTIONS = SUGGESTIONS + ["Which students have pending fees?", "Who are the top performers?",
+                                   "Who has low attendance?", "Any new announcements?"]
+STUDENT_SUGGESTIONS = ["How are my marks?", "What is my fee status?", "What is my attendance?"] + SUGGESTIONS[:4]
 
 
 def _money(v: float) -> str:
@@ -111,6 +114,7 @@ def _msg_action(db: Session, viewer: User, *, student: Student | None = None, st
 
 def _student_answer(db: Session, viewer: User, s: Student, q: str, can_fees: bool, base: str, multi: bool = False) -> dict:
     """`base` is the route prefix for the profile: /students/<id> or /me."""
+    CURRENT_YEAR = year_of(db, s.school_id)
     perf = analytics.performance(db, s, CURRENT_YEAR)
     head = f"{s.name} · Class {s.grade}-{s.section} · ID {s.admission_no}"
     open_btn = act("Open profile", base)
@@ -124,6 +128,17 @@ def _student_answer(db: Session, viewer: User, s: Student, q: str, can_fees: boo
                  stats=[stat("Total", _money(fee["total"])), stat("Paid", _money(fee["paid"]), "good"),
                         stat("Pending", _money(fee["pending"]), "bad" if fee["pending"] else "good")],
                  bars=[bar("Fee paid", paid_pct)], actions=[act("Fee details", f"{base}?tab=fees"), open_btn])
+    if _has(q, "attendance", "absent", "absence", "present", "bunk"):
+        a = _attendance_of(db, s)
+        if a["month"]["days"] == 0:
+            return R(f"{head}\nNo attendance has been recorded yet.", actions=[open_btn])
+        m = a["month"]
+        return R(f"{head}\nAttendance over the last {attendance.WINDOW_DAYS} days: {m['pct']}% "
+                 f"({m['absent']} absent of {m['days']} school days)."
+                 + (f" Below the {attendance.LOW_PCT:.0f}% requirement." if a["low"] else ""),
+                 stats=[stat("Attendance", f"{m['pct']}%", "bad" if a["low"] else "good"), stat("Absent", m["absent"]),
+                        stat("Late", m["late"])],
+                 bars=[bar("Attendance", m["pct"])], actions=[act("Open profile", f"{base}?tab=attendance"), open_btn])
     if _has(q, "weak", "lack", "improv", "struggl", "poor", "behind"):
         if not perf["has_data"]:
             return R(f"{head}\nNo marks recorded for {CURRENT_YEAR} yet.", actions=[open_btn])
@@ -157,6 +172,13 @@ def _student_answer(db: Session, viewer: User, s: Student, q: str, can_fees: boo
              stats=stats, bars=[bar(x["subject"], x["avg_pct"]) for x in perf["subjects"][:8]], actions=acts)
 
 
+def _attendance_of(db: Session, s: Student) -> dict:
+    rows = [(a.day, a.status) for a in db.scalars(select(Attendance).where(
+        Attendance.student_id == s.id, Attendance.day >= date.today() - timedelta(days=attendance.WINDOW_DAYS)))]
+    m = attendance._summary(rows)
+    return {"month": m, "low": m["days"] >= attendance.MIN_DAYS and m["pct"] < attendance.LOW_PCT}
+
+
 def _staff_answer(db: Session, viewer: User, s: Staff) -> dict:
     ct = f"Class teacher of {s.class_teacher_of}\n" if s.class_teacher_of else ""
     acts = [act("Open profile", f"/staff/{s.id}")]
@@ -175,6 +197,7 @@ def _who_buttons(rows, tone_key: str = "pct") -> list[dict]:
 def answer_rules(db: Session, user: User, question: str) -> dict:
     q = question.lower().strip()
     sid = user.school_id
+    CURRENT_YEAR = year_of(db, sid)
     perms = perm_set(user)
     is_student = user.role == "student"
     can_students = "students.view" in perms
@@ -244,6 +267,26 @@ def answer_rules(db: Session, user: User, question: str) -> dict:
         return R(f"Class {grade} has {len(rows)} subjects:\n" + "\n".join(f"• {n}" for _, n in rows),
                  stats=[stat("Subjects", len(rows))],
                  actions=[act(n, f"/subjects/{i}") for i, n in rows[:8]] + [act("All subjects", f"/subjects?grade={grade}")])
+
+    if _has(q, "announcement", "notice", "circular"):
+        rows = db.scalars(announcements._visible(db, user).order_by(Announcement.pinned.desc(), Announcement.id.desc()).limit(4)).all()
+        if not rows:
+            return R("There are no announcements right now.", actions=[act("Open announcements", "/announcements")])
+        return R("Latest announcements:\n" + "\n".join(f"• {a.title} ({a.created_at:%d %b})" for a in rows),
+                 actions=[act("Open announcements", "/announcements")])
+
+    if _has(q, "attendance", "absent", "absentee", "bunk"):
+        if is_student or not ({"attendance.manage", "students.view"} & perms):
+            return R(DENIED)
+        al = attendance.low_attendance(db, sid)
+        if not al:
+            return R(f"No student is below {attendance.LOW_PCT:.0f}% attendance in the last {attendance.WINDOW_DAYS} days.",
+                     actions=[act("Attendance", "/attendance")])
+        return R(f"{len(al)} student{'s' if len(al) != 1 else ''} need attention (below {attendance.LOW_PCT:.0f}% in the last "
+                 f"{attendance.WINDOW_DAYS} days, or absent {attendance.STREAK}+ days in a row):\n"
+                 + "\n".join(f"• {x['name']} ({x['grade']}-{x['section']}): {x['pct']}%" for x in al[:6]),
+                 stats=[stat("Flagged", len(al), "bad")], actions=[act(f"{x['name']} · {x['grade']}-{x['section']}", f"/students/{x['id']}") for x in al[:5]]
+                 + [act("Attendance report", "/attendance")])
 
     if _has(q, "fee", "pending", "defaulter", "outstanding", "collection", "due"):
         if not can_fees:

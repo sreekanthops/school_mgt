@@ -5,8 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .config import CORS_ORIGINS
-from .db import Base, engine
-from .routers import academics, accounts, board, messages, people, platform, recovery
+from .db import Base, add_missing_columns, engine
+from .routers import (academics, accounts, announcements, attendance, billing, board, bulk, exports, messages, people,
+                      platform, recovery)
 
 logging.basicConfig(level=logging.INFO, format='{"level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}')
 log = logging.getLogger("school")
@@ -17,6 +18,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 Base.metadata.create_all(engine)
+add_missing_columns()
 
 
 @app.middleware("http")
@@ -42,6 +44,11 @@ app.include_router(academics.router)
 app.include_router(messages.router)
 app.include_router(board.router)
 app.include_router(recovery.router)
+app.include_router(announcements.router)
+app.include_router(attendance.router)
+app.include_router(exports.router)
+app.include_router(bulk.router)
+app.include_router(billing.router)
 
 
 @app.get("/api/health")

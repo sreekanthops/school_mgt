@@ -202,3 +202,16 @@ tr.click { cursor: pointer; } tr.click:hover td { background: #f8f7ff; }
 .note-vote button:hover:not(:disabled) { background: #fff; }
 .note-vote button.on.yes { background: #16a34a; color: #fff; border-color: #16a34a; } .note-vote button.on.no { background: #e11d48; color: #fff; border-color: #e11d48; }
 @media (prefers-reduced-motion: reduce) { .note, .note:hover { transition: none; transform: none; } }
+
+/* announcements, attendance, import */
+.stack { display: grid; gap: 14px; }
+.notice.pinned { border-left: 4px solid var(--warn, #f59e0b); }
+.notice-body { margin: 12px 0 0; white-space: pre-wrap; word-break: break-word; }
+.notice-ok { display: flex; gap: 8px; align-items: flex-start; background: #ecfdf5; color: #065f46; padding: 10px 12px; border-radius: 10px; margin-bottom: 10px; }
+.check { display: flex; gap: 8px; align-items: center; font-weight: 500; }
+.check input { width: auto; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 99px; overflow: hidden; }
+.seg button { border: 0; background: #fff; padding: 6px 14px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; color: var(--muted, #667); }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.on.good { background: #16a34a; color: #fff; } .seg button.on.warn { background: #f59e0b; color: #fff; } .seg button.on.bad { background: #e11d48; color: #fff; }
+.bad-text { color: var(--bad); font-weight: 600; }

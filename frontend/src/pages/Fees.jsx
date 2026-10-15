@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search } from "lucide-react";
 import { api, GRADES, gradeLabel, inr } from "../api.js";
-import { Async, Badge, Meter, PageHead, Stat, useLoad } from "../components/ui.jsx";
+import { useAuth } from "../auth.jsx";
+import { Async, Badge, DownloadButton, FormModal, Meter, PageHead, Stat, useLoad } from "../components/ui.jsx";
 
 const KIND = { Paid: "good", Partial: "warn", Unpaid: "bad", "No fee set": "gray" };
 
@@ -15,10 +16,26 @@ export default function Fees() {
   if (grade) params.set("grade", grade);
   if (status) params.set("status", status);
   if (q) params.set("q", q);
-  const state = useLoad(() => api(`/fees?${params}`), [grade, status, q]);
+  const { can } = useAuth();
+  const [bulk, setBulk] = useState(false);
+  const [tick, setTick] = useState(0);
+  const state = useLoad(() => api(`/fees?${params}`), [grade, status, q, tick]);
+  const ex = new URLSearchParams(params);
+  const d0 = state.data || {};
   return (
     <>
-      <PageHead title="Fee register" sub="Total, paid and pending for every student · click a row to record payments" />
+      <PageHead title="Fee register" sub="Total, paid and pending for every student · click a row to record payments">
+        <DownloadButton path={`/export/fees?format=csv&${ex}`} label="Export CSV" />
+        <DownloadButton path={`/export/fees?format=pdf&${ex}`} label="PDF" />
+        {can("fees.manage") && <button className="btn ghost" onClick={() => setBulk(true)}>Set fee for a class</button>}
+      </PageHead>
+      {bulk && state.data && (
+        <FormModal title="Set the fee for a whole class" onClose={() => setBulk(false)} submitLabel="Apply to class"
+          fields={[{ key: "grade", label: "Class", type: "select", options: GRADES.map((g) => [g, gradeLabel(g)]), default: grade || "1" },
+            { key: "year", label: "Academic year (e.g. 2026-27)", required: true, default: d0.year },
+            { key: "total_amount", label: "Total fee per student (₹)", type: "number", min: 0, required: true }]}
+          onSubmit={async (b) => { await api("/fees/bulk", { method: "PUT", body: b }); setTick((t) => t + 1); }} />
+      )}
       <div className="toolbar">
         <div className="search"><Search size={16} /><input placeholder="Search student" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <select value={grade} onChange={(e) => setGrade(e.target.value)}>

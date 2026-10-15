@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import {
-  AlertTriangle, BookOpen, Building2, Lightbulb, CalendarDays, GraduationCap, Images, Info, KeyRound, LayoutDashboard, LogOut, Menu,
+  AlertTriangle, BookOpen, Building2, CalendarCheck, Megaphone, Receipt, Lightbulb, CalendarDays, GraduationCap, Images, Info, KeyRound, LayoutDashboard, LogOut, Menu,
   MessagesSquare, ShieldCheck, Target, UserCircle, Users, Wallet, Camera, GraduationCap as Logo,
 } from "lucide-react";
 import { api } from "./api.js";
@@ -30,6 +30,10 @@ const SchoolDetail = lazy(() => import("./pages/SchoolDetail.jsx"));
 const Account = lazy(() => import("./pages/Account.jsx"));
 const Messages = lazy(() => import("./pages/Messages.jsx"));
 const Board = lazy(() => import("./pages/Board.jsx"));
+const Announcements = lazy(() => import("./pages/Announcements.jsx"));
+const Attendance = lazy(() => import("./pages/Attendance.jsx"));
+const NewYear = lazy(() => import("./pages/NewYear.jsx"));
+const MyBilling = lazy(() => import("./components/Billing.jsx").then((m) => ({ default: m.MyBilling })));
 
 /** [path, label, icon, visible(auth) , group] */
 const NAV = [
@@ -38,7 +42,9 @@ const NAV = [
   ["/students", "Students", GraduationCap, (a) => !a.isSuper, "School"],
   ["/staff", "Staff", Users, (a) => !a.isSuper, "School"],
   ["/subjects", "Subjects", BookOpen, (a) => !a.isSuper, "School"],
+  ["/attendance", "Attendance", CalendarCheck, (a) => a.can("attendance.manage") || a.can("students.view"), "School"],
   ["/fees", "Fees", Wallet, (a) => a.can("fees.view") || a.can("fees.manage"), "School"],
+  ["/announcements", "Announcements", Megaphone, (a) => !a.isSuper, "Campus"],
   ["/messages", "Messages", MessagesSquare, (a) => !a.isSuper, "Campus"],
   ["/board", "Idea Board", Lightbulb, (a) => !a.isSuper, "Campus"],
   ["/events", "Events", CalendarDays, (a) => !a.isSuper, "Campus"],
@@ -47,6 +53,7 @@ const NAV = [
   ["/about", "About School", Info, (a) => !a.isSuper, "Campus"],
   ["/approvals", "Photo Approvals", Camera, (a) => a.can("photos.approve"), "Admin"],
   ["/users", "Users & Access", ShieldCheck, (a) => a.can("users.manage"), "Admin"],
+  ["/billing", "Billing", Receipt, (a) => a.role === "admin", "Admin"],
   ["/schools", "Schools", Building2, (a) => a.isSuper, "Platform"],
   ["/account", "My Account", KeyRound, () => true, "Admin"],
 ];
@@ -73,6 +80,7 @@ function Shell() {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(0);
   const [unread, setUnread] = useState(0);
+  const [notices, setNotices] = useState(0);
   const loc = useLocation();
   useEffect(() => setOpen(false), [loc.pathname]);
   // pick up a renewal (or a new reminder stage) without needing to sign out and in
@@ -84,7 +92,10 @@ function Shell() {
   }, [loc.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!session || isSuper) return undefined;
-    const load = () => api("/messages/unread").then((r) => setUnread(r.count)).catch(() => {});
+    const load = () => {
+      api("/messages/unread").then((r) => setUnread(r.count)).catch(() => {});
+      api("/announcements/unread").then((r) => setNotices(r.count)).catch(() => {});
+    };
     load();
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
@@ -111,6 +122,7 @@ function Shell() {
                   <Icon size={18} /> {label}
                   {to === "/approvals" && pending > 0 && <span className="count">{pending}</span>}
                   {to === "/messages" && unread > 0 && <span className="count">{unread}</span>}
+                  {to === "/announcements" && notices > 0 && loc.pathname !== "/announcements" && <span className="count">{notices}</span>}
                 </NavLink>
               ))}
             </div>
@@ -159,6 +171,10 @@ export default function App() {
         <Route path="staff" element={<Guard ok={!a.isSuper}><Staff /></Guard>} />
         <Route path="staff/:id" element={<Guard ok={!a.isSuper}><StaffDetail /></Guard>} />
         <Route path="messages" element={<Guard ok={!a.isSuper}><Messages /></Guard>} />
+        <Route path="announcements" element={<Guard ok={!a.isSuper}><Announcements /></Guard>} />
+        <Route path="attendance" element={<Guard ok={a.can("attendance.manage") || a.can("students.view")}><Attendance /></Guard>} />
+        <Route path="new-year" element={<Guard ok={a.can("school.manage") && a.can("students.manage")}><NewYear /></Guard>} />
+        <Route path="billing" element={<Guard ok={a.role === "admin"}><MyBilling /></Guard>} />
         <Route path="board" element={<Guard ok={!a.isSuper}><Board /></Guard>} />
         <Route path="events" element={<Guard ok={!a.isSuper}><Events /></Guard>} />
         <Route path="gallery" element={<Guard ok={!a.isSuper}><Gallery /></Guard>} />

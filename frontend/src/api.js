@@ -73,6 +73,24 @@ export async function fetchImage(path) {
   return URL.createObjectURL(await res.blob());
 }
 
+/** Download a file from an authenticated endpoint (a plain link cannot send the login token). */
+export async function download(path, fallbackName = "download") {
+  const res = await fetch(`/api${path}`, { headers: authHeaders() });
+  expire(res);
+  if (!res.ok) {
+    let msg = "Could not download the file";
+    try { const d = await res.json(); if (typeof d?.detail === "string") msg = d.detail; } catch { /* not JSON */ }
+    throw new ApiError(res.status, msg);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1] || fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
 export const inr = (n) => (n == null ? "–" : `₹${Math.round(n).toLocaleString("en-IN")}`);
 export const gradeLabel = (g) => (g === "LKG" || g === "UKG" ? g : `Class ${g}`);
 export const GRADES = ["LKG", "UKG", ...Array.from({ length: 10 }, (_, i) => String(i + 1))];

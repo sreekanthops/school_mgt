@@ -4,7 +4,7 @@ import { ChevronDown, ChevronUp, Plus, Search } from "lucide-react";
 import { api } from "../api.js";
 import { useAuth } from "../auth.jsx";
 import { staffFields } from "../forms.js";
-import { Async, Badge, FormModal, PageHead, Photo, useLoad } from "../components/ui.jsx";
+import { Async, Badge, FormModal, PageHead, Photo, Secret, useLoad } from "../components/ui.jsx";
 
 export default function Staff() {
   const nav = useNavigate();
@@ -12,18 +12,24 @@ export default function Staff() {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [secret, setSecret] = useState(null);
   const [tick, setTick] = useState(0);
   const state = useLoad(() => api(`/staff${q ? `?q=${encodeURIComponent(q)}` : ""}`), [q, tick]);
 
   return (
     <>
-      <PageHead title="Staff" sub="Use Quick view for a summary, or open a member for the full profile">
+      <PageHead title="Staff" sub="Use Quick view for a summary, or open a member for the full profile. A login is created automatically for each new member.">
         {can("staff.manage") && <button className="btn" onClick={() => setAdding(true)}><Plus size={16} /> Add staff</button>}
       </PageHead>
       {adding && (
         <FormModal title="Add staff member" fields={staffFields} onClose={() => setAdding(false)}
-          onSubmit={async (b) => { await api("/staff", { method: "POST", body: b }); setTick((t) => t + 1); }} />
+          onSubmit={async (b) => {
+            const r = await api("/staff", { method: "POST", body: b });
+            if (r.login) setSecret({ title: `${r.name} added`, username: r.login.username, password: r.login.temp_password, idLabel: "Staff ID (login)" });
+            setTick((t) => t + 1);
+          }} />
       )}
+      {secret && <Secret {...secret} onClose={() => setSecret(null)} />}
       <div className="toolbar">
         <div className="search"><Search size={16} /><input placeholder="Search name or subject" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       </div>

@@ -9,12 +9,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import analytics, storage
-from ..config import CURRENT_YEAR
 from ..db import get_db
-from ..deps import can_see_fees, can_see_student, get_owned, get_student, next_code, staff_letter
+from ..deps import can_see_fees, can_see_student, get_owned, get_student, next_code, staff_letter, year_of
 from ..models import EXAM_MAX, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, School, Staff, Student, Subject, User
+from . import attendance
 from ..schemas import FeeIn, MarkIn, PaymentIn, StaffIn, StudentIn
-from ..security import gen_password, hash_password, need, perm_set, school_user, staff_side
+from ..security import (PRINCIPAL_DEFAULT, TEACHER_DEFAULT, gen_password, hash_password, need, perm_set, school_user,
+                        staff_side)
 
 router = APIRouter(prefix="/api")
 
@@ -49,9 +50,10 @@ def _check_limit(db: Session, school_id: int, model, limit_attr: str, label: str
 
 # ---------- dashboard ----------
 @router.get("/dashboard")
-def dashboard(year: str = CURRENT_YEAR, user: User = Depends(staff_side), db: Session = Depends(get_db)):
+def dashboard(year: Optional[str] = None, user: User = Depends(staff_side), db: Session = Depends(get_db)):
     sid = user.school_id
     perms = perm_set(user)
+    year = year_of(db, sid, year)
     d = analytics.dashboard(db, sid, year)
     count = lambda m: db.scalar(select(func.count()).select_from(m).where(m.school_id == sid))
     d["counts"] = {
@@ -65,6 +67,7 @@ def dashboard(year: str = CURRENT_YEAR, user: User = Depends(staff_side), db: Se
         for e in db.scalars(select(Event).where(Event.school_id == sid, Event.date >= date.today())
                             .order_by(Event.date).limit(4))
     ]
+    d["attendance_alerts"] = attendance.low_attendance(db, sid)[:5] if perms & {"attendance.manage", "students.view"} else []
     if "students.view" not in perms:
         d.update(top_students=[], at_risk=[], avg_pct=None, distribution={}, by_grade=[])
     if not ({"fees.view", "fees.manage"} & perms):
@@ -80,10 +83,11 @@ def dashboard(year: str = CURRENT_YEAR, user: User = Depends(staff_side), db: Se
 def list_students(
     q: Optional[str] = Query(None, max_length=100), grade: Optional[str] = None,
     section: Optional[str] = Query(None, max_length=2), page: int = Query(1, ge=1),
-    page_size: int = Query(12, ge=1, le=100), year: str = CURRENT_YEAR,
+    page_size: int = Query(12, ge=1, le=100), year: Optional[str] = None,
     user: User = Depends(school_user), db: Session = Depends(get_db),
 ):
     perms = perm_set(user)
+    year = year_of(db, user.school_id, year)
     full = "students.view" in perms
     fee_ok = bool({"fees.view", "fees.manage"} & perms)
     stmt = select(Student).where(Student.school_id == user.school_id)
@@ -154,12 +158,14 @@ def delete_student(sid: int, user: User = Depends(need("students.manage")), db: 
 
 
 @router.get("/students/{sid}")
-def student_detail(sid: int, year: str = CURRENT_YEAR, user: User = Depends(school_user),
+def student_detail(sid: int, year: Optional[str] = None, user: User = Depends(school_user),
                    db: Session = Depends(get_db)):
     s = get_student(db, user, sid)
     if not can_see_student(user, sid):
         raise HTTPException(403, "You can only view your own details")
-    years = set(analytics.student_years(db, sid)) | {CURRENT_YEAR}
+    current = year_of(db, user.school_id)
+    year = year or current
+    years = set(analytics.student_years(db, sid)) | {current}
     years = sorted(years, reverse=True)
     perf = analytics.performance(db, s, year)
     history = []
@@ -180,7 +186,7 @@ def student_detail(sid: int, year: str = CURRENT_YEAR, user: User = Depends(scho
 
 
 @router.get("/subjects-for-marks")
-def subjects_for_marks(sid: int, year: str = CURRENT_YEAR, user: User = Depends(need("marks.edit")),
+def subjects_for_marks(sid: int, year: Optional[str] = None, user: User = Depends(need("marks.edit")),
                        db: Session = Depends(get_db)):
     """Subjects of the student's class, plus their existing marks, for the marks-entry form."""
     s = get_student(db, user, sid)
@@ -214,10 +220,11 @@ def _fee_guard(user: User, sid: int):
 
 
 @router.get("/fees")
-def fees_overview(year: str = CURRENT_YEAR, grade: Optional[str] = None, status: Optional[str] = Query(None, max_length=20),
+def fees_overview(year: Optional[str] = None, grade: Optional[str] = None, status: Optional[str] = Query(None, max_length=20),
                   q: Optional[str] = Query(None, max_length=100),
                   user: User = Depends(need("fees.view", "fees.manage")), db: Session = Depends(get_db)):
     """School-wide fee register (one row per student)."""
+    year = year_of(db, user.school_id, year)
     stmt = select(Student).where(Student.school_id == user.school_id)
     if grade:
         stmt = stmt.where(Student.grade == grade)
@@ -242,10 +249,10 @@ def fees_overview(year: str = CURRENT_YEAR, grade: Optional[str] = None, status:
 
 
 @router.get("/students/{sid}/fees")
-def student_fees(sid: int, year: str = CURRENT_YEAR, user: User = Depends(school_user), db: Session = Depends(get_db)):
+def student_fees(sid: int, year: Optional[str] = None, user: User = Depends(school_user), db: Session = Depends(get_db)):
     get_student(db, user, sid)
     _fee_guard(user, sid)
-    return analytics.fee_summary(db, sid, year)
+    return analytics.fee_summary(db, sid, year_of(db, user.school_id, year))
 
 
 @router.put("/students/{sid}/fees")
@@ -376,17 +383,30 @@ def staff_detail(sid: int, user: User = Depends(school_user), db: Session = Depe
 
 
 @router.post("/staff", status_code=201)
-def add_staff(data: StaffIn, user: User = Depends(need("staff.manage")), db: Session = Depends(get_db)):
-    """The staff ID is generated: <school><year>t<nnn>, or ...p<nnn> for the principal."""
+def add_staff(data: StaffIn, create_login: bool = Query(True), user: User = Depends(need("staff.manage")),
+              db: Session = Depends(get_db)):
+    """The staff ID is generated: <school><year>t<nnn>, or ...p<nnn> for the principal. Unless create_login=false, a
+    login is created too (login = staff ID, one-time password, must be changed at first sign-in). It gets the
+    standard teacher permissions (the principal also gets fees.view and announcements.manage), but never more than
+    the person adding them holds."""
     _check_limit(db, user.school_id, Staff, "max_staff", "staff")
     fields = data.model_dump(exclude={"employee_id"})
     for _ in range(3):  # retry if two requests grab the same number
         s = Staff(school_id=user.school_id, employee_id=next_code(db, user.school_id, staff_letter(data.designation)),
                   **fields)
         db.add(s)
+        db.flush()
+        login = None
+        if create_login:
+            defaults = PRINCIPAL_DEFAULT if staff_letter(data.designation) == "p" else TEACHER_DEFAULT
+            pw = gen_password()
+            granted = sorted(set(defaults) & perm_set(user))
+            db.add(User(school_id=user.school_id, username=s.employee_id, password_hash=hash_password(pw), role="staff",
+                        full_name=s.name, permissions=",".join(granted), staff_id=s.id, must_change=True))
+            login = {"username": s.employee_id, "temp_password": pw, "permissions": granted}
         try:
             db.commit()
-            return _staff_out(s)
+            return {**_staff_out(s), "login": login}
         except IntegrityError:
             db.rollback()
     raise HTTPException(409, "Could not allocate a staff ID, please try again")
@@ -405,6 +425,8 @@ def update_staff(sid: int, data: StaffIn, user: User = Depends(need("staff.manag
 def delete_staff(sid: int, user: User = Depends(need("staff.manage")), db: Session = Depends(get_db)):
     s = get_owned(db, Staff, sid, user.school_id)
     storage.remove(s.photo)
+    for u in db.scalars(select(User).where(User.staff_id == s.id, User.school_id == user.school_id, User.role == "staff")):
+        db.delete(u)  # a person who has left must not keep their sign-in
     db.delete(s)
     db.commit()
 

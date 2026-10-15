@@ -7,6 +7,7 @@ import { AlertTriangle, Building2, Eye, GraduationCap, KeyRound, MapPin, Pencil,
 import { api, inr } from "../api.js";
 import { schoolFields } from "../forms.js";
 import { SUB_KIND, schoolInitial, usageKind } from "../platform.js";
+import Billing from "../components/Billing.jsx";
 import { Async, Badge, Confirm, FormModal, Meter, PageHead, Secret, Stat, useLoad } from "../components/ui.jsx";
 
 const COLORS = ["#5b4bdb", "#0ea5e9", "#16a34a", "#f59e0b", "#e11d48", "#7c6cf0"];
@@ -19,6 +20,7 @@ export default function Schools() {
   const [dlg, setDlg] = useState(null);
   const [secret, setSecret] = useState(null);
   const [q, setQ] = useState("");
+  const [view, setView] = useState("schools");
   const state = useLoad(async () => {
     const [overview, schools] = await Promise.all([api("/platform/overview"), api("/schools")]);
     return { overview, schools };
@@ -30,7 +32,11 @@ export default function Schools() {
       <PageHead title="Platform Console" sub="Every school on the platform: usage, fees, subscriptions and controls">
         <button className="btn" onClick={() => setDlg({ type: "add" })}><Plus size={16} /> New school</button>
       </PageHead>
-      <Async state={state}>
+      <div className="tabs">
+        {[["schools", "Schools"], ["billing", "Billing & renewals"]].map(([k, l]) => <button key={k} className={view === k ? "on" : ""} onClick={() => setView(k)}>{l}</button>)}
+      </div>
+      {view === "billing" && <Billing />}
+      {view === "schools" && <Async state={state}>
         {({ overview: o, schools }) => {
           const t = o.totals;
           const bySchool = o.schools.map((s) => ({ name: s.name.length > 16 ? `${s.name.slice(0, 15)}…` : s.name, Students: s.students, Staff: s.staff }));
@@ -168,7 +174,7 @@ export default function Schools() {
             </>
           );
         }}
-      </Async>
+      </Async>}
       {dlg?.type === "add" && (
         <FormModal title="Create school" fields={createFields} submitLabel="Create" onClose={() => setDlg(null)}
           onSubmit={async (b) => {

@@ -8,7 +8,7 @@ import { ArrowLeft, Check, Clock, Pencil, Plus, Trash2, X } from "lucide-react";
 import { api, gradeLabel, inr } from "../api.js";
 import { useAuth } from "../auth.jsx";
 import { studentFields } from "../forms.js";
-import { Async, Badge, Confirm, FormModal, Meter, PageHead, Photo, PhotoUpload, Stat, tone, useLoad } from "../components/ui.jsx";
+import { Async, Badge, Confirm, DownloadButton, FormModal, Meter, PageHead, Photo, PhotoUpload, Stat, tone, useLoad } from "../components/ui.jsx";
 
 const EXAMS = ["UT1", "Midterm", "UT2", "Final"];
 const EXAM_COLORS = { UT1: "#93c5fd", Midterm: "#6366f1", UT2: "#a78bfa", Final: "#16a34a" };
@@ -20,7 +20,7 @@ export default function StudentDetail({ me = false }) {
   const nav = useNavigate();
   const [year, setYear] = useState(null);
   const [search] = useSearchParams();
-  const [view, setView] = useState(["overview", "marks", "fees"].includes(search.get("tab")) ? search.get("tab") : "overview");
+  const [view, setView] = useState(["overview", "marks", "fees", "attendance"].includes(search.get("tab")) ? search.get("tab") : "overview");
   const [tick, setTick] = useState(0);
   const [modal, setModal] = useState(null);
   const refresh = () => setTick((t) => t + 1);
@@ -32,7 +32,7 @@ export default function StudentDetail({ me = false }) {
         const s = d.student;
         const p = d.performance;
         const can = d.can;
-        const tabs = [["overview", "Overview"], ["marks", "All marks"], ...(d.fees ? [["fees", "Fees"]] : [])];
+        const tabs = [["overview", "Overview"], ["marks", "All marks"], ["attendance", "Attendance"], ...(d.fees ? [["fees", "Fees"]] : [])];
         return (
           <>
             {!me && <Link to="/students" className="backlink"><ArrowLeft size={14} /> All students</Link>}
@@ -41,6 +41,7 @@ export default function StudentDetail({ me = false }) {
               <select style={{ width: "auto" }} value={d.selected_year} onChange={(e) => setYear(e.target.value)}>
                 {d.years.map((y) => <option key={y} value={y}>{y}{y === d.years[0] ? " (current)" : ""}</option>)}
               </select>
+              <DownloadButton path={`/students/${id}/report-card?year=${d.selected_year}`} label="Report card" />
               {can.marks && <button className="btn" onClick={() => setModal("marks")}><Plus size={16} /> Enter marks</button>}
               {can.edit && <button className="btn ghost" onClick={() => setModal("edit")}><Pencil size={16} /> Edit</button>}
               {can.edit && <button className="btn danger" onClick={() => setModal("delete")}><Trash2 size={16} /> Delete</button>}
@@ -78,6 +79,7 @@ export default function StudentDetail({ me = false }) {
             <div className="tabs">{tabs.map(([k, l]) => <button key={k} className={view === k ? "on" : ""} onClick={() => setView(k)}>{l}</button>)}</div>
             {view === "overview" && <Overview d={d} />}
             {view === "marks" && <Marks p={p} />}
+            {view === "attendance" && <AttendanceTab sid={s.id} />}
             {view === "fees" && d.fees && <Fees d={d} sid={s.id} canManage={can.fees} onChange={refresh} />}
           </>
         );
@@ -279,13 +281,59 @@ function Fees({ d, sid, canManage, onChange }) {
       <div className="card flush" style={{ overflowX: "auto" }}>
         <h2 style={{ padding: "20px 20px 0" }}>Payment history</h2>
         <table>
-          <thead><tr><th>Date</th><th>Receipt</th><th>Mode</th><th>Amount</th></tr></thead>
+          <thead><tr><th>Date</th><th>Receipt</th><th>Mode</th><th>Amount</th><th /></tr></thead>
           <tbody>
-            {f.payments.map((x) => <tr key={x.id}><td>{x.paid_on}</td><td>{x.receipt_no}</td><td>{x.mode}</td><td>{inr(x.amount)}</td></tr>)}
-            {f.payments.length === 0 && <tr><td colSpan={4} className="empty">No payments yet.</td></tr>}
+            {f.payments.map((x) => <tr key={x.id}><td>{x.paid_on}</td><td>{x.receipt_no}</td><td>{x.mode}</td><td>{inr(x.amount)}</td><td><DownloadButton path={`/students/${sid}/payments/${x.id}/receipt`} label="Receipt" /></td></tr>)}
+            {f.payments.length === 0 && <tr><td colSpan={5} className="empty">No payments yet.</td></tr>}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+const ATT_KIND = { P: "good", L: "warn", A: "bad" };
+const ATT_NAME = { P: "Present", L: "Late", A: "Absent" };
+
+function AttendanceTab({ sid }) {
+  const state = useLoad(() => api(`/students/${sid}/attendance`), [sid]);
+  return (
+    <Async state={state}>
+      {(a) => {
+        if (a.year.days === 0) return <div className="card empty">No attendance has been recorded yet.</div>;
+        const chart = a.by_month.map((m) => ({ month: m.month.slice(2), pct: m.pct }));
+        return (
+          <div className="grid g2">
+            <div className="card">
+              <h2>Last 30 days</h2>
+              <div className="grid g3" style={{ marginBottom: 12 }}>
+                <Stat label="Attendance" value={a.month.pct == null ? "–" : `${a.month.pct}%`} sub={`${a.month.days} school days`} />
+                <Stat label="Absent" value={a.month.absent} /><Stat label="Late" value={a.month.late} />
+              </div>
+              {a.month.pct != null && <Meter pct={a.month.pct} kind={a.low ? "bad" : undefined} />}
+              {a.low && <div className="error" style={{ marginTop: 10 }}>Below the {a.threshold}% attendance requirement. Please speak to the class teacher.</div>}
+              {a.streak >= 3 && <div className="error" style={{ marginTop: 10 }}>Absent {a.streak} school days in a row.</div>}
+              <div className="small muted" style={{ marginTop: 10 }}>This year so far: {a.year.pct}% ({a.year.absent} absent of {a.year.days} days)</div>
+            </div>
+            <div className="card">
+              <h2>Month by month</h2>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={chart}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="month" fontSize={12} /><YAxis domain={[0, 100]} fontSize={12} />
+                  <Tooltip formatter={(v) => `${v}%`} /><Bar dataKey="pct" name="Attendance" fill="#16a34a" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="card" style={{ gridColumn: "1 / -1" }}>
+              <h2>Recent days</h2>
+              <div className="chip-list">
+                {a.recent.map((r) => <Badge key={r.day} kind={ATT_KIND[r.status]}>{r.day.slice(5)} · {ATT_NAME[r.status]}</Badge>)}
+              </div>
+            </div>
+          </div>
+        );
+      }}
+    </Async>
   );
 }

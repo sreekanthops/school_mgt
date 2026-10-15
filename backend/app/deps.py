@@ -7,7 +7,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Chapter, Staff, Student, Subject, User
+from .config import CURRENT_YEAR
+from .models import Chapter, School, Staff, Student, Subject, User
 from .security import perm_set
 
 # Every login ID is  <school id><YYYY><letter><number>  (the letter keeps school id and year unambiguous):
@@ -83,3 +84,11 @@ def photo_url(kind: str, obj_id: int, rel: Optional[str]) -> Optional[str]:
     if not rel:
         return None
     return f"/{kind}/{obj_id}/photo?v={rel.split('/')[-1][:8]}"
+
+
+def year_of(db: Session, school_id: int, year: Optional[str] = None) -> str:
+    """The academic year to use: the one asked for, else the school's current year, else the app default."""
+    if year:
+        return year
+    s = db.get(School, school_id)
+    return (s.academic_year if s and s.academic_year else None) or CURRENT_YEAR

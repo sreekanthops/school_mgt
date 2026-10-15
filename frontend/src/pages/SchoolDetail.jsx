@@ -7,10 +7,11 @@ import {
 import { api, gradeLabel, inr } from "../api.js";
 import { branchFields, schoolFields } from "../forms.js";
 import { SUB_KIND, schoolInitial, usageKind } from "../platform.js";
+import { InvoiceTable, NewInvoice } from "../components/Billing.jsx";
 import { Async, Badge, Confirm, Empty, FormModal, Meter, PageHead, Secret, Stat, useLoad } from "../components/ui.jsx";
 
 const COLORS = ["#5b4bdb", "#0ea5e9", "#f59e0b", "#e11d48", "#16a34a"];
-const TABS = [["overview", "Overview"], ["academics", "Academics & fees"], ["branches", "Branches"], ["people", "Owner & staff logins"], ["activity", "Activity"]];
+const TABS = [["overview", "Overview"], ["academics", "Academics & fees"], ["branches", "Branches"], ["people", "Owner & staff logins"], ["billing", "Billing"], ["activity", "Activity"]];
 const when = (iso) => (iso ? iso.slice(0, 16).replace("T", " ") : "Never");
 
 export default function SchoolDetail() {
@@ -53,6 +54,7 @@ export default function SchoolDetail() {
             {tab === "academics" && <Academics s={s} />}
             {tab === "branches" && <Branches s={s} reload={reload} setDlg={setDlg} />}
             {tab === "people" && <People s={s} reload={reload} setSecret={setSecret} />}
+            {tab === "billing" && <SchoolBilling s={s} />}
             {tab === "activity" && <Activity s={s} />}
 
             {dlg?.type === "edit" && (
@@ -303,5 +305,22 @@ function Activity({ s }) {
         <tbody>{s.audit.map((a) => <tr key={a.id}><td className="muted">{when(a.at)}</td><td><b>{a.action.replaceAll("_", " ")}</b></td><td>{a.detail || "–"}</td><td>{a.actor}</td></tr>)}</tbody>
       </table>
     </div>
+  );
+}
+
+function SchoolBilling({ s }) {
+  const [tick, setTick] = useState(0);
+  const [creating, setCreating] = useState(false);
+  const state = useLoad(() => api(`/invoices?school_id=${s.id}`), [s.id, tick]);
+  const sub = s.subscription_end ? `${s.subscription_status} · ends ${s.subscription_end}` : "No end date";
+  return (
+    <>
+      <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+        <span className="muted">{s.plan} plan · {sub}</span>
+        <button className="btn" onClick={() => setCreating(true)}>New invoice</button>
+      </div>
+      {creating && <NewInvoice school={s} price={{ Free: 0, Standard: 24000, Premium: 60000 }[s.plan] ?? 0} onClose={() => setCreating(false)} onDone={() => setTick((t) => t + 1)} />}
+      <Async state={state}>{(rows) => <InvoiceTable rows={rows} showSchool={false} onChange={() => { setTick((t) => t + 1); }} />}</Async>
+    </>
   );
 }

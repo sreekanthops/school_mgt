@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Camera, X } from "lucide-react";
-import { fetchImage, upload } from "../api.js";
+import { Camera, Download, X } from "lucide-react";
+import { download, fetchImage, upload } from "../api.js";
 
 export function useLoad(fn, deps = []) {
   const [state, setState] = useState({ data: null, error: null, loading: true });
@@ -207,3 +207,30 @@ export function Secret({ title, username, password, idLabel = "Username", onClos
 }
 
 export const Empty = ({ children }) => <div className="empty">{children}</div>;
+
+/** Button that downloads a file from an API path. `keep` keeps it usable when the school is read-only (downloads are reads). */
+export function DownloadButton({ path, label, name, icon = true, className = "btn ghost sm" }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  async function go() {
+    setBusy(true);
+    setErr("");
+    try { await download(path, name); } catch (x) { setErr(x.message); } finally { setBusy(false); }
+  }
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column" }}>
+      <button type="button" className={`${className} keep`} onClick={go} disabled={busy}>
+        {icon && <Download size={14} />} {busy ? "Preparing…" : label}
+      </button>
+      {err && <span className="small" style={{ color: "var(--bad)" }}>{err}</span>}
+    </span>
+  );
+}
+
+/** "Export" pair: CSV and PDF of the same data. */
+export const ExportButtons = ({ base, params = "", what }) => (
+  <>
+    <DownloadButton path={`${base}?format=csv${params}`} label={`${what} CSV`} />
+    <DownloadButton path={`${base}?format=pdf${params}`} label="PDF" />
+  </>
+);

@@ -41,6 +41,7 @@ class School(Base):
     max_staff: Mapped[int] = mapped_column(Integer, default=100)
     subscription_end: Mapped[Optional[dt.date]] = mapped_column(Date, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # private to the platform team
+    academic_year: Mapped[Optional[str]] = mapped_column(String(9), nullable=True)  # NULL => the app default (CURRENT_ACADEMIC_YEAR)
 
 
 class Branch(Base):
@@ -268,3 +269,63 @@ class BoardVote(Base):
     note_id: Mapped[int] = mapped_column(ForeignKey("board_notes.id", ondelete="CASCADE"), index=True)
     voter_key: Mapped[str] = mapped_column(String(64))
     value: Mapped[str] = mapped_column(String(8))  # agree | disagree
+
+
+class Announcement(Base):
+    """A school-wide notice. audience: all | staff | students | class (class needs `grade`)."""
+    __tablename__ = "announcements"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
+    title: Mapped[str] = mapped_column(String(150))
+    body: Mapped[str] = mapped_column(String(2000))
+    audience: Mapped[str] = mapped_column(String(10), default="all")
+    grade: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    author_name: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+
+
+class AnnouncementRead(Base):
+    __tablename__ = "announcement_reads"
+    __table_args__ = (UniqueConstraint("announcement_id", "user_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    announcement_id: Mapped[int] = mapped_column(ForeignKey("announcements.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+
+ATTENDANCE_STATUS = ("P", "A", "L")  # present | absent | late
+
+
+class Attendance(Base):
+    """One row per student per day."""
+    __tablename__ = "attendance"
+    __table_args__ = (UniqueConstraint("student_id", "day"), Index("ix_att_school_day", "school_id", "day"))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), index=True)
+    day: Mapped[dt.date] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(1))
+    marked_by: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # login ID of whoever marked it
+
+
+class Invoice(Base):
+    """Subscription invoice raised by the platform team. No foreign key on purpose: like the audit trail,
+    billing records survive deletion of the school (school_name is a snapshot)."""
+    __tablename__ = "invoices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    number: Mapped[str] = mapped_column(String(20), unique=True)
+    school_id: Mapped[int] = mapped_column(Integer, index=True)
+    school_name: Mapped[str] = mapped_column(String(120))
+    plan: Mapped[str] = mapped_column(String(20))
+    period_start: Mapped[dt.date] = mapped_column(Date)
+    period_end: Mapped[dt.date] = mapped_column(Date)
+    amount: Mapped[float] = mapped_column(Float)  # before tax
+    tax: Mapped[float] = mapped_column(Float)
+    total: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(10), default="Pending")  # Pending | Paid | Cancelled
+    issued_on: Mapped[dt.date] = mapped_column(Date, default=dt.date.today)
+    due_on: Mapped[dt.date] = mapped_column(Date)
+    paid_on: Mapped[Optional[dt.date]] = mapped_column(Date, nullable=True)
+    mode: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    reference: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
