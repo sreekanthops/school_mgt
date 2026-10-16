@@ -7,11 +7,11 @@ import { useAuth } from "../auth.jsx";
 /**
  * Forgot-password — three tiers.
  *
- * Tier 1 (all users):  Enter your Login ID + pick the 3 questions YOU set at first login
- *                       and type in your answers — all in one form, no separate step to
- *                       "fetch" questions (avoids leaking which accounts exist).
- *                       If all 3 match you can choose a new password immediately.
- *                       After 5 wrong attempts the account is locked for a cooldown period.
+ * Tier 1 (all users):
+ *   Step A — Enter your Login ID → the system fetches the EXACT questions you set up
+ *             (no free picker — you cannot choose different questions).
+ *   Step B — Answer those three questions and choose a new password.
+ *             After 5 wrong attempts the account is locked for a cooldown period.
  *
  * Tier 2 (all users):  Still can't get in? → contact IT / school admin in person.
  *                       They issue a temporary password from Users & Access.
@@ -21,37 +21,24 @@ import { useAuth } from "../auth.jsx";
  *                       My Account → a one-time reset link (15 min) is emailed to you.
  */
 
-/** All 12 questions in the bank — must match backend QUESTIONS list order. */
-const QUESTIONS = [
-  "What was the name of your first pet, or a pet you loved as a child?",
-  "What was the name of the street you lived on as a child?",
-  "What is the first name of your childhood best friend?",
-  "In which town or village did your mother grow up?",
-  "What was the name of the first school you attended?",
-  "What is the surname of your favourite teacher?",
-  "What was the first film you watched in a cinema?",
-  "What is the title of the first book you remember loving?",
-  "What is the first name of your paternal grandmother?",
-  "What was your favourite game to play as a child?",
-  "What was the first dish you learned to cook, or loved eating as a child?",
-  "What was the name of your favourite toy or cartoon character as a child?",
-];
-
-const DEFAULT_IDS = [0, 1, 2]; // initial placeholder selections
-
 export default function ForgotPassword() {
   const { session } = useAuth();
 
-  // Tier 1 — single combined form
-  const [step, setStep] = useState("form"); // "form" | "done"
+  // ── Tier 1 state ──────────────────────────────────────────────────────────
+  // step: "id" → enter login ID   |  "answers" → answer fetched questions  |  "done"
+  const [step, setStep] = useState("id");
   const [username, setUsername] = useState("");
-  // Each slot: { id: questionIndex, answer: string }
-  const [slots, setSlots] = useState(DEFAULT_IDS.map((id) => ({ id, answer: "" })));
+  const [fetchErr, setFetchErr] = useState("");
+  const [fetching, setFetching] = useState(false);
+
+  // Questions fetched from server: [{ id, text }, ...]
+  const [questions, setQuestions] = useState([]);
+  const [answers, setAnswers] = useState(["", "", ""]);
   const [pw, setPw] = useState({ a: "", b: "" });
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // Tier 3 state
+  // ── Tier 3 state ──────────────────────────────────────────────────────────
   const [ownerEmail, setOwnerEmail] = useState("");
   const [ownerStep, setOwnerStep] = useState("idle"); // "idle" | "sent"
   const [ownerErr, setOwnerErr] = useState("");
@@ -59,26 +46,31 @@ export default function ForgotPassword() {
 
   if (session) return <Navigate to="/" replace />;
 
-  // ── helpers ──────────────────────────────────────────────────────────────────
-  function setSlotId(i, id) {
-    setSlots(slots.map((s, j) => (j === i ? { ...s, id: Number(id) } : s)));
-  }
-  function setSlotAnswer(i, answer) {
-    setSlots(slots.map((s, j) => (j === i ? { ...s, answer } : s)));
+  // ── Step A: fetch questions for this username ────────────────────────────
+  async function fetchQuestions(e) {
+    e.preventDefault();
+    if (!username.trim()) return;
+    setFetching(true);
+    setFetchErr("");
+    try {
+      const data = await api("/auth/forgot/questions", {
+        method: "POST",
+        body: { username: username.trim() },
+      });
+      setQuestions(data.questions); // [{ id, text }]
+      setAnswers(data.questions.map(() => ""));
+      setStep("answers");
+    } catch (x) {
+      setFetchErr(x.message);
+    } finally {
+      setFetching(false);
+    }
   }
 
-  /** Questions available for a given slot (not selected in any other slot). */
-  function available(slotIndex) {
-    const taken = new Set(slots.map((s, j) => (j !== slotIndex ? s.id : null)));
-    return QUESTIONS.map((text, id) => ({ id, text })).filter((q) => !taken.has(q.id));
-  }
-
-  // ── Tier 1 submit ─────────────────────────────────────────────────────────────
+  // ── Step B: submit answers + new password ────────────────────────────────
   async function submit(e) {
     e.preventDefault();
     if (pw.a !== pw.b) return setErr("The two passwords do not match.");
-    const ids = slots.map((s) => s.id);
-    if (new Set(ids).size !== 3) return setErr("Please choose three different questions.");
     setBusy(true);
     setErr("");
     try {
@@ -86,7 +78,7 @@ export default function ForgotPassword() {
         method: "POST",
         body: {
           username: username.trim(),
-          answers: slots.map((s) => ({ id: s.id, answer: s.answer })),
+          answers: questions.map((q, i) => ({ id: q.id, answer: answers[i] })),
           new_password: pw.a,
         },
       });
@@ -98,7 +90,7 @@ export default function ForgotPassword() {
     }
   }
 
-  // ── Tier 3 handler ────────────────────────────────────────────────────────────
+  // ── Tier 3 handler ────────────────────────────────────────────────────────
   async function sendOwnerEmail(e) {
     e.preventDefault();
     setOwnerBusy(true);
@@ -131,8 +123,9 @@ export default function ForgotPassword() {
             <div>
               <b>Answer your security questions</b>
               <p style={{ opacity: 0.85, margin: "4px 0 0" }}>
-                Enter your Login ID, pick the three questions <em>you</em> chose when you first set
-                up your account, type in your answers, and set a new password — all in one go.
+                Enter your Login ID — the system will show the <em>exact</em> three questions
+                you chose when you first set up your account. Answer them correctly and choose
+                a new password in one step.
                 Answers are not case-sensitive and punctuation is ignored.
                 After 5 wrong attempts the form locks for a cooldown period.
               </p>
@@ -171,68 +164,135 @@ export default function ForgotPassword() {
         <div className="login-card">
           <Link to="/login" className="backlink"><ArrowLeft size={14} /> Back to sign in</Link>
 
-          {/* ── TIER 1: combined single form ──────────────────────────────────── */}
-          {step === "form" && (
-            <form onSubmit={submit}>
+          {/* ── TIER 1 step A: enter Login ID ─────────────────────────────────── */}
+          {step === "id" && (
+            <form onSubmit={fetchQuestions}>
               <h1 style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <ShieldAlert size={20} /> Reset your password
               </h1>
               <p className="muted" style={{ marginBottom: 16, marginTop: 4 }}>
-                Enter your Login ID, select the three questions <b>you</b> answered when you first
-                set up your account, fill in the answers, and choose a new password.
+                Enter your Login ID. We will show you the security questions you set up —
+                answer them to reset your password.
               </p>
+
+              {fetchErr && <div className="error">{fetchErr}</div>}
+
+              <div className="field" style={{ marginBottom: 16 }}>
+                <label htmlFor="fu">Login ID</label>
+                <input
+                  id="fu"
+                  value={username}
+                  required
+                  autoFocus
+                  autoComplete="username"
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
+
+              <button
+                className="btn"
+                style={{ width: "100%", justifyContent: "center" }}
+                disabled={fetching}
+              >
+                <ShieldAlert size={15} /> {fetching ? "Looking up…" : "Continue"}
+              </button>
+            </form>
+          )}
+
+          {/* ── TIER 1 step B: answer fetched questions ───────────────────────── */}
+          {step === "answers" && (
+            <form onSubmit={submit}>
+              <h1 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <ShieldAlert size={20} /> Answer your questions
+              </h1>
+              <p className="muted" style={{ marginBottom: 16, marginTop: 4 }}>
+                Answer the questions you chose when you set up your account, then pick a new password.
+                Answers are not case-sensitive and punctuation is ignored.
+              </p>
+
+              <div
+                className="notice"
+                style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}
+              >
+                Signing in as: <b>{username}</b>
+                <button
+                  type="button"
+                  className="btn-link"
+                  style={{ marginLeft: "auto", fontSize: 12 }}
+                  onClick={() => { setStep("id"); setErr(""); }}
+                >
+                  Change ID
+                </button>
+              </div>
 
               {err && <div className="error">{err}</div>}
 
-              <div className="field" style={{ marginBottom: 14 }}>
-                <label htmlFor="fu">Login ID</label>
-                <input id="fu" value={username} required autoFocus autoComplete="username"
-                  onChange={(e) => setUsername(e.target.value)} />
-              </div>
-
-              {slots.map((slot, i) => (
-                <div key={i} style={{ marginBottom: 12, padding: "10px 12px", background: "var(--surface,#f7f8fa)", borderRadius: 6, border: "1px solid var(--border,#e5e7eb)" }}>
-                  <div className="field" style={{ marginBottom: 8 }}>
-                    <label htmlFor={`qsel${i}`}>Question {i + 1}</label>
-                    <select id={`qsel${i}`} value={slot.id} required
-                      onChange={(e) => setSlotId(i, e.target.value)}
-                      style={{ width: "100%" }}>
-                      {available(i).map((q) => (
-                        <option key={q.id} value={q.id}>{q.text}</option>
-                      ))}
-                      {/* Keep the current selection visible even if it'd be "taken" by another slot */}
-                      {!available(i).find((q) => q.id === slot.id) && (
-                        <option value={slot.id}>{QUESTIONS[slot.id]}</option>
-                      )}
-                    </select>
-                  </div>
+              {questions.map((q, i) => (
+                <div
+                  key={q.id}
+                  style={{
+                    marginBottom: 12,
+                    padding: "10px 12px",
+                    background: "var(--surface,#f7f8fa)",
+                    borderRadius: 6,
+                    border: "1px solid var(--border,#e5e7eb)",
+                  }}
+                >
+                  <p style={{ margin: "0 0 6px", fontSize: "0.875rem", fontWeight: 500 }}>
+                    {i + 1}. {q.text}
+                  </p>
                   <div className="field" style={{ marginBottom: 0 }}>
-                    <label htmlFor={`ans${i}`}>Your answer</label>
-                    <input id={`ans${i}`} value={slot.answer} required maxLength={80}
+                    <input
+                      value={answers[i]}
+                      required
+                      maxLength={80}
                       autoComplete="off"
-                      onChange={(e) => setSlotAnswer(i, e.target.value)} />
+                      placeholder="Your answer"
+                      onChange={(e) => {
+                        const next = [...answers];
+                        next[i] = e.target.value;
+                        setAnswers(next);
+                      }}
+                    />
                   </div>
                 </div>
               ))}
 
               <div className="field" style={{ marginBottom: 10, marginTop: 4 }}>
                 <label htmlFor="fp1">New password (min 10 characters)</label>
-                <input id="fp1" type="password" minLength={10} maxLength={128} required
-                  autoComplete="new-password" value={pw.a}
-                  onChange={(e) => setPw({ ...pw, a: e.target.value })} />
+                <input
+                  id="fp1"
+                  type="password"
+                  minLength={10}
+                  maxLength={128}
+                  required
+                  autoComplete="new-password"
+                  value={pw.a}
+                  onChange={(e) => setPw({ ...pw, a: e.target.value })}
+                />
               </div>
               <div className="field" style={{ marginBottom: 16 }}>
                 <label htmlFor="fp2">Confirm new password</label>
-                <input id="fp2" type="password" required autoComplete="new-password" value={pw.b}
-                  onChange={(e) => setPw({ ...pw, b: e.target.value })} />
+                <input
+                  id="fp2"
+                  type="password"
+                  required
+                  autoComplete="new-password"
+                  value={pw.b}
+                  onChange={(e) => setPw({ ...pw, b: e.target.value })}
+                />
               </div>
-              <button className="btn" style={{ width: "100%", justifyContent: "center" }} disabled={busy}>
+              <button
+                className="btn"
+                style={{ width: "100%", justifyContent: "center" }}
+                disabled={busy}
+              >
                 <KeyRound size={15} /> {busy ? "Checking…" : "Reset my password"}
               </button>
             </form>
           )}
 
-          {/* ── TIER 1: success ────────────────────────────────────────────── */}
+          {/* ── TIER 1: success ────────────────────────────────────────────────── */}
           {step === "done" && (
             <div>
               <h1>Password changed ✓</h1>
@@ -243,7 +303,7 @@ export default function ForgotPassword() {
             </div>
           )}
 
-          {/* ── TIER 2: ask IT / admin ─────────────────────────────────────── */}
+          {/* ── TIER 2: ask IT / admin ─────────────────────────────────────────── */}
           {step !== "done" && (
             <div style={{ marginTop: 28, borderTop: "1px solid var(--border,#e5e7eb)", paddingTop: 22 }}>
               <h2 style={{ fontSize: "0.95rem", marginTop: 0, display: "flex", alignItems: "center", gap: 6 }}>
@@ -262,7 +322,7 @@ export default function ForgotPassword() {
             </div>
           )}
 
-          {/* ── TIER 3: owner Gmail reset ──────────────────────────────────── */}
+          {/* ── TIER 3: owner Gmail reset ──────────────────────────────────────── */}
           {step !== "done" && (
             <div style={{ marginTop: 24, borderTop: "1px solid var(--border,#e5e7eb)", paddingTop: 22 }}>
               <h2 style={{ fontSize: "0.95rem", marginTop: 0, display: "flex", alignItems: "center", gap: 6 }}>
@@ -278,10 +338,21 @@ export default function ForgotPassword() {
                   {ownerErr && <div className="error" style={{ marginBottom: 10 }}>{ownerErr}</div>}
                   <div className="field" style={{ marginBottom: 12 }}>
                     <label htmlFor="oe">Your configured Gmail address</label>
-                    <input id="oe" type="email" value={ownerEmail} required placeholder="you@gmail.com"
-                      onChange={(e) => setOwnerEmail(e.target.value)} autoComplete="email" />
+                    <input
+                      id="oe"
+                      type="email"
+                      value={ownerEmail}
+                      required
+                      placeholder="you@gmail.com"
+                      onChange={(e) => setOwnerEmail(e.target.value)}
+                      autoComplete="email"
+                    />
                   </div>
-                  <button className="btn" style={{ width: "100%", justifyContent: "center" }} disabled={ownerBusy}>
+                  <button
+                    className="btn"
+                    style={{ width: "100%", justifyContent: "center" }}
+                    disabled={ownerBusy}
+                  >
                     <Mail size={15} /> {ownerBusy ? "Sending…" : "Send reset link"}
                   </button>
                 </form>

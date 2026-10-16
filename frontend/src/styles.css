@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;700&display=swap');
+
 :root {
   --bg: #f3f5fb; --surface: #fff; --text: #172033; --muted: #6b7385; --border: #e6e9f2;
   --primary: #5b4bdb; --primary-2: #7c6cf0; --primary-soft: #eeecff;
@@ -237,3 +239,23 @@ tr.click { cursor: pointer; } tr.click:hover td { background: #f8f7ff; }
 .seg button + button { border-left: 1px solid var(--border); }
 .seg button.on.good { background: #16a34a; color: #fff; } .seg button.on.warn { background: #f59e0b; color: #fff; } .seg button.on.bad { background: #e11d48; color: #fff; }
 .bad-text { color: var(--bad); font-weight: 600; }
+
+/* personal sticky notes — MyBoard page */
+.sticky-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; padding: 4px 0 20px; }
+.sticky { font-family: "Caveat", "Comic Sans MS", cursive; position: relative; min-height: 160px; border-radius: 6px 6px 6px 42px; padding: 18px 16px 44px; box-shadow: 4px 4px 8px rgba(0,0,0,.12), 1px 1px 2px rgba(0,0,0,.08); display: flex; flex-direction: column; transition: transform .14s, box-shadow .14s; }
+.sticky:hover { transform: translateY(-3px) rotate(-.5deg); box-shadow: 6px 8px 18px rgba(0,0,0,.18); }
+.sticky::before { content: ""; position: absolute; bottom: 0; left: 0; width: 42px; height: 42px; background: rgba(0,0,0,.08); border-radius: 0 6px 0 6px; clip-path: polygon(0 0, 100% 100%, 0 100%); }
+.sticky .sticky-pin { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ff8a8a, #b91c1c); box-shadow: 0 2px 4px rgba(0,0,0,.4); z-index: 1; }
+.sticky .sticky-text { flex: 1; font-size: 22px; line-height: 1.3; word-break: break-word; white-space: pre-wrap; border: none; background: transparent; width: 100%; resize: none; outline: none; font-family: inherit; padding: 0; cursor: text; }
+.sticky .sticky-meta { font-size: 13px; opacity: .6; margin-top: 6px; font-family: Inter, system-ui, sans-serif; }
+.sticky .sticky-actions { position: absolute; bottom: 8px; right: 10px; display: flex; gap: 4px; opacity: 0; transition: opacity .15s; }
+.sticky:hover .sticky-actions { opacity: 1; }
+.sticky .sticky-actions button { border: none; background: rgba(0,0,0,.12); color: inherit; border-radius: 6px; width: 26px; height: 26px; display: grid; place-items: center; cursor: pointer; }
+.sticky .sticky-actions button:hover { background: rgba(0,0,0,.22); }
+.sticky-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.sticky-toolbar .color-swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: transform .1s; flex-shrink: 0; }
+.sticky-toolbar .color-swatch.selected { border-color: #374151; transform: scale(1.2); }
+.sticky-toolbar .color-swatch:hover { transform: scale(1.15); }
+.sticky-composer { border: 2px dashed var(--border); border-radius: 12px; padding: 16px; background: #fffdf3; margin-bottom: 20px; }
+.sticky-new-btn { font-family: "Caveat", "Comic Sans MS", cursive; font-size: 18px; display: flex; align-items: center; gap: 8px; border: 2px dashed #d1d5db; background: transparent; color: var(--muted); border-radius: 8px; padding: 12px 16px; cursor: pointer; width: 100%; }
+.sticky-new-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }

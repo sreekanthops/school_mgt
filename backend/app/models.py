@@ -345,6 +345,22 @@ class StaffLeave(Base):
     reviewed_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime, nullable=True)
 
 
+class PersonalNote(Base):
+    """A private sticky note written by a user for their own My Board page.
+    Notes are never shared — each user sees only their own."""
+    __tablename__ = "personal_notes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    school_id: Mapped[int] = _school_fk()
+    text: Mapped[str] = mapped_column(Text)
+    note_color: Mapped[str] = mapped_column(String(12), default="#fef08a")   # sticky bg colour
+    text_color: Mapped[str] = mapped_column(String(12), default="#1f2328")   # text colour
+    bold: Mapped[bool] = mapped_column(Boolean, default=False)
+    italic: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    updated_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class TimetableLog(Base):
     """Audit trail for timetable modifications made by teachers (self-edit).
     Owner / admin can view these to track who changed what."""

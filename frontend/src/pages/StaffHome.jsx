@@ -324,11 +324,8 @@ export default function StaffHome() {
                 ))}
               </div>
 
-              {/* ── Upcoming holidays + leaves ───────────────────────── */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-
-                {/* Upcoming holidays */}
-                <div className="card">
+              {/* ── Upcoming holidays ────────────────────────────────── */}
+              <div className="card">
                   <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
                     <h2 style={{ margin: 0 }}>
                       <CalendarRange size={17} style={{ verticalAlign: -3, marginRight: 6 }} />
@@ -348,10 +345,10 @@ export default function StaffHome() {
                       </Badge>
                     </div>
                   ))}
-                </div>
+              </div>
 
-                {/* My leaves */}
-                <div className="card">
+              {/* ── My leaves ────────────────────────────────────────── */}
+              <div className="card">
                   <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
                     <h2 style={{ margin: 0 }}>
                       <Bell size={17} style={{ verticalAlign: -3, marginRight: 6 }} />
@@ -376,7 +373,6 @@ export default function StaffHome() {
                       <Badge kind={STATUS_KIND[l.status]}>{l.status}</Badge>
                     </div>
                   ))}
-                </div>
               </div>
 
             </div>

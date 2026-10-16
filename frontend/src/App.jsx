@@ -13,7 +13,7 @@ import Login from "./pages/Login.jsx";
 import ResetOwnerPassword from "./pages/ResetOwnerPassword.jsx";
 
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
-const StaffHome = lazy(() => import("./pages/StaffHome.jsx"));
+const MyBoard = lazy(() => import("./pages/MyBoard.jsx"));
 const Students = lazy(() => import("./pages/Students.jsx"));
 const StudentDetail = lazy(() => import("./pages/StudentDetail.jsx"));
 const Fees = lazy(() => import("./pages/Fees.jsx"));
@@ -43,9 +43,9 @@ const MyBilling = lazy(() => import("./components/Billing.jsx").then((m) => ({ d
 
 /** [path, label, icon, visible(auth) , group] */
 const NAV = [
-  ["/", "Dashboard", LayoutDashboard, (a) => !a.isStudent && !a.isSuper && a.role !== "staff", "Overview"],
-  ["/", "My Dashboard", LayoutDashboard, (a) => a.role === "staff", "Overview"],
+  ["/", "Dashboard", LayoutDashboard, (a) => !a.isStudent && !a.isSuper, "Overview"],
   ["/me", "My Profile", UserCircle, (a) => a.isStudent, "Overview"],
+  ["/myboard", "My Board", Lightbulb, (a) => !a.isSuper, "Overview"],
   ["/students", "Students", GraduationCap, (a) => !a.isSuper, "School"],
   ["/staff", "Staff", Users, (a) => !a.isSuper, "School"],
   ["/subjects", "Subjects", BookOpen, (a) => !a.isSuper, "School"],
@@ -54,7 +54,7 @@ const NAV = [
   ["/fees", "Fees", Wallet, (a) => a.can("fees.view") || a.can("fees.manage"), "School"],
   ["/announcements", "Announcements", Megaphone, (a) => !a.isSuper, "Campus"],
   ["/messages", "Messages", MessagesSquare, (a) => !a.isSuper, "Campus"],
-  ["/board", "Idea Board", Lightbulb, (a) => !a.isSuper, "Campus"],
+  ["/board", "Idea Board", Lightbulb, (a) => !a.isSuper && a.role !== "student", "Campus"],
   ["/events", "Events", CalendarDays, (a) => !a.isSuper, "Campus"],
   ["/gallery", "Gallery", Images, (a) => !a.isSuper, "Campus"],
   ["/goals", "Future Goals", Target, (a) => !a.isSuper, "Campus"],
@@ -202,12 +202,7 @@ export default function App() {
       <Route path="/forgot" element={<ForgotPassword />} />
       <Route path="/reset-owner-password" element={<ResetOwnerPassword />} />
       <Route element={<Shell />}>
-        <Route index element={
-          a.isSuper ? <Navigate to="/schools" replace />
-          : a.isStudent ? <Navigate to="/me" replace />
-          : a.role === "staff" ? <StaffHome />
-          : <Dashboard />
-        } />
+        <Route index element={a.isSuper ? <Navigate to="/schools" replace /> : a.isStudent ? <Navigate to="/me" replace /> : <Dashboard />} />
         <Route path="dashboard" element={<Navigate to="/" replace />} />
         <Route path="me" element={<Guard ok={a.isStudent}><StudentDetail me /></Guard>} />
         <Route path="students" element={<Guard ok={!a.isSuper}><Students /></Guard>} />
@@ -230,6 +225,7 @@ export default function App() {
         <Route path="goals" element={<Guard ok={!a.isSuper}><Goals /></Guard>} />
         <Route path="about" element={<Guard ok={!a.isSuper}><About /></Guard>} />
         <Route path="approvals" element={<Guard ok={a.can("photos.approve")}><Approvals /></Guard>} />
+        <Route path="myboard" element={<Guard ok={!a.isSuper}><MyBoard /></Guard>} />
         <Route path="holidays" element={<Guard ok={!a.isSuper}><Holidays /></Guard>} />
         <Route path="leaves" element={<Guard ok={!a.isSuper && !a.isStudent}><Leaves /></Guard>} />
         <Route path="users" element={<Guard ok={a.can("users.manage")}><UsersPage /></Guard>} />
