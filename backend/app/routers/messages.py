@@ -41,8 +41,6 @@ def _contact(db: Session, u: User) -> dict:
 def _allowed(me: User, other: User) -> bool:
     if other.id == me.id or not other.active or other.school_id != me.school_id or other.role == "superadmin":
         return False
-    if me.role == "student" and other.role == "student":
-        return False
     return True
 
 

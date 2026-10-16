@@ -4,7 +4,7 @@ import {
   Bar, BarChart, CartesianGrid, Legend, Line, LineChart, PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar,
   RadarChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { ArrowLeft, Check, Clock, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, ClipboardList, Clock, Pencil, Plus, Trash2, X } from "lucide-react";
 import { api, gradeLabel, inr } from "../api.js";
 import { useAuth } from "../auth.jsx";
 import { studentFields } from "../forms.js";
@@ -20,7 +20,7 @@ export default function StudentDetail({ me = false }) {
   const nav = useNavigate();
   const [year, setYear] = useState(null);
   const [search] = useSearchParams();
-  const [view, setView] = useState(["overview", "marks", "fees", "attendance"].includes(search.get("tab")) ? search.get("tab") : "overview");
+  const [view, setView] = useState(["overview", "marks", "fees", "attendance", "leaves"].includes(search.get("tab")) ? search.get("tab") : "overview");
   const [tick, setTick] = useState(0);
   const [modal, setModal] = useState(null);
   const refresh = () => setTick((t) => t + 1);
@@ -32,7 +32,14 @@ export default function StudentDetail({ me = false }) {
         const s = d.student;
         const p = d.performance;
         const can = d.can;
-        const tabs = [["overview", "Overview"], ["marks", "All marks"], ["attendance", "Attendance"], ...(d.fees ? [["fees", "Fees"]] : [])];
+        const isOwnProfile = me || (session?.student_id === s.id);
+        const tabs = [
+          ["overview", "Overview"],
+          ["marks", "All marks"],
+          ["attendance", "Attendance"],
+          ...(d.fees ? [["fees", "Fees"]] : []),
+          ...(isOwnProfile ? [["leaves", "Leaves"]] : []),
+        ];
         return (
           <>
             {!me && <Link to="/students" className="backlink"><ArrowLeft size={14} /> All students</Link>}
@@ -81,6 +88,7 @@ export default function StudentDetail({ me = false }) {
             {view === "marks" && <Marks p={p} />}
             {view === "attendance" && <AttendanceTab sid={s.id} />}
             {view === "fees" && d.fees && <Fees d={d} sid={s.id} canManage={can.fees} onChange={refresh} />}
+            {view === "leaves" && <StudentLeavesTab studentId={s.id} />}
           </>
         );
       }}
@@ -335,5 +343,143 @@ function AttendanceTab({ sid }) {
         );
       }}
     </Async>
+  );
+}
+
+const LEAVE_TYPES = ["Sick", "Casual", "Family", "Personal", "Other"];
+const STATUS_KIND = { pending: "warn", approved: "good", rejected: "bad" };
+
+function StudentLeavesTab({ studentId }) {
+  const [tick, setTick] = useState(0);
+  const [dlg, setDlg] = useState(null);
+  const state = useLoad(() => api(`/leaves?student_id=${studentId}`), [tick, studentId]);
+  const reload = () => setTick((t) => t + 1);
+
+  return (
+    <Async state={state}>
+      {(leaves) => (
+        <>
+          <div className="row" style={{ marginBottom: 14, justifyContent: "flex-end" }}>
+            <button className="btn sm" onClick={() => setDlg("apply")}>
+              <ClipboardList size={14} /> Apply for leave
+            </button>
+          </div>
+
+          {leaves.length === 0 && (
+            <div className="card"><div className="muted">No leave applications yet.</div></div>
+          )}
+
+          {leaves.map((l) => (
+            <div key={l.id} className="card" style={{ marginBottom: 10, padding: "12px 16px" }}>
+              <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+                <div>
+                  <b>{l.leave_type}</b>
+                  <span className="muted" style={{ marginLeft: 8 }}>
+                    {l.from_date} – {l.to_date}
+                    {l.days > 1 ? ` (${l.days} days)` : " (1 day)"}
+                  </span>
+                </div>
+                <Badge kind={STATUS_KIND[l.status]}>{l.status}</Badge>
+              </div>
+              {l.reviewer_name && l.status === "pending" && (
+                <div className="small muted" style={{ marginTop: 4 }}>
+                  Sent to: {l.reviewer_name}
+                </div>
+              )}
+              {l.reason && (
+                <div className="small muted" style={{ marginTop: 4 }}>{l.reason}</div>
+              )}
+              {l.review_note && (
+                <div className="small" style={{
+                  marginTop: 4,
+                  color: l.status === "rejected" ? "var(--bad,#e11d48)" : "var(--good,#16a34a)"
+                }}>
+                  Note: {l.review_note}
+                </div>
+              )}
+              {l.status === "pending" && (
+                <div className="row" style={{ marginTop: 8, justifyContent: "flex-end" }}>
+                  <button className="btn ghost sm danger"
+                    onClick={async () => {
+                      await api(`/leaves/${l.id}`, { method: "DELETE" });
+                      reload();
+                    }}>
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {dlg === "apply" && (
+            <LeaveApplyStudentModal onClose={() => setDlg(null)} onDone={reload} />
+          )}
+        </>
+      )}
+    </Async>
+  );
+}
+
+function LeaveApplyStudentModal({ onClose, onDone }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [f, setF] = useState({ from_date: today, to_date: today, leave_type: "Sick", reason: "" });
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setErr("");
+    try {
+      await api("/leaves", { method: "POST", body: f });
+      onDone();
+      onClose();
+    } catch (x) {
+      setErr(x.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Reuse the Modal from ui.jsx — import is already at top of file via Confirm etc.
+  // We render inline as a simple overlay using the Confirm/FormModal pattern
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+        <div className="modal-head"><h2>Apply for leave</h2><button className="icon-btn" onClick={onClose}>✕</button></div>
+        <div className="modal-body">
+          <form onSubmit={submit} className="grid" style={{ gap: 12 }}>
+            {err && <div className="error">{err}</div>}
+            <div className="form-grid">
+              <div className="field">
+                <label>From date *</label>
+                <input type="date" required value={f.from_date}
+                  onChange={(e) => setF({ ...f, from_date: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>To date *</label>
+                <input type="date" required value={f.to_date} min={f.from_date}
+                  onChange={(e) => setF({ ...f, to_date: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Leave type *</label>
+                <select value={f.leave_type} onChange={(e) => setF({ ...f, leave_type: e.target.value })}>
+                  {LEAVE_TYPES.map((t) => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="field">
+              <label>Reason</label>
+              <textarea rows={3} maxLength={500} value={f.reason}
+                onChange={(e) => setF({ ...f, reason: e.target.value })}
+                placeholder="Briefly describe the reason" />
+            </div>
+            <div className="modal-foot">
+              <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
+              <button className="btn" disabled={busy}>{busy ? "Submitting…" : "Submit application"}</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -323,11 +323,16 @@ LEAVE_TYPES = ("Casual", "Sick", "Earned", "Maternity", "Paternity", "Unpaid", "
 
 
 class StaffLeave(Base):
-    """A leave application submitted by a staff member."""
+    """A leave application submitted by a staff member or a student."""
     __tablename__ = "staff_leaves"
     id: Mapped[int] = mapped_column(primary_key=True)
     school_id: Mapped[int] = _school_fk()
-    staff_id: Mapped[int] = mapped_column(ForeignKey("staff.id", ondelete="CASCADE"), index=True)
+    # exactly one of staff_id / student_id is set
+    staff_id: Mapped[Optional[int]] = mapped_column(ForeignKey("staff.id", ondelete="CASCADE"), nullable=True, index=True)
+    student_id: Mapped[Optional[int]] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), nullable=True, index=True)
+    # who should review this leave (section-head staff user id for student leaves)
+    reviewer_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     from_date: Mapped[dt.date] = mapped_column(Date, index=True)
     to_date: Mapped[dt.date] = mapped_column(Date)
     leave_type: Mapped[str] = mapped_column(String(20))       # Casual | Sick | Earned …

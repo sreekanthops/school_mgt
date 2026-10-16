@@ -92,10 +92,15 @@ export default function Leaves() {
                 <div key={l.id} className="card" style={{ padding: "14px 16px" }}>
                   <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
                     <div>
-                      {l.staff_name && (
-                        <Link to={`/staff/${l.staff_id}`} style={{ fontWeight: 700 }}>
-                          {l.staff_name}
+                      {l.applicant_name && (
+                        <Link
+                          to={l.kind === "student" ? `/students/${l.student_id}` : `/staff/${l.staff_id}`}
+                          style={{ fontWeight: 700 }}>
+                          {l.applicant_name}
                         </Link>
+                      )}
+                      {l.kind === "student" && (
+                        <span className="chip" style={{ marginLeft: 6, fontSize: 11 }}>Student</span>
                       )}
                       <div className="small muted" style={{ marginTop: 2 }}>Applied: {l.applied_at?.slice(0, 10)}</div>
                     </div>
@@ -103,9 +108,10 @@ export default function Leaves() {
                   </div>
                   <div className="kv quick" style={{ marginTop: 10 }}>
                     <span className="muted">Type</span><span>{l.leave_type}</span>
-                    <span className="muted">From</span><span>{l.from_date}</span>
-                    <span className="muted">To</span><span>{l.to_date}</span>
-                    <span className="muted">Days</span><span>{l.days}</span>
+                      <span className="muted">From</span><span>{l.from_date}</span>
+                      <span className="muted">To</span><span>{l.to_date}</span>
+                      <span className="muted">Days</span><span>{l.days}</span>
+                      {l.reviewer_name && <><span className="muted">Reviewer</span><span>{l.reviewer_name}</span></>}
                   </div>
                   {l.reason && (
                     <div className="small muted" style={{ marginTop: 8, borderTop: "1px solid var(--border,#e5e7eb)", paddingTop: 8 }}>

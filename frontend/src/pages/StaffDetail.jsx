@@ -139,6 +139,11 @@ function LeavesTab({ staffId, canManage, isOwnProfile }) {
                 </div>
                 <Badge kind={STATUS_KIND[l.status]}>{l.status}</Badge>
               </div>
+              {l.reviewer_name && l.status === "pending" && (
+                <div className="small muted" style={{ marginTop: 4 }}>
+                  Reviewer: {l.reviewer_name}
+                </div>
+              )}
               {l.reason && <div className="small muted" style={{ marginTop: 4 }}>{l.reason}</div>}
               {l.review_note && (
                 <div className="small" style={{ marginTop: 4, color: l.status === "rejected" ? "var(--bad,#e11d48)" : "var(--good,#16a34a)" }}>
