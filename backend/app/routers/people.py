@@ -4,14 +4,15 @@ from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, or_, select
+from pydantic import BaseModel, Field
+from sqlalchemy import Integer, case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import analytics, storage
 from ..db import get_db
 from ..deps import can_see_fees, can_see_student, get_owned, get_student, next_code, staff_letter, year_of
-from ..models import (EXAM_MAX, Chapter, ClassPeriod, Event, Fee, GalleryItem, Goal, Mark,
+from ..models import (EXAM_MAX, Attendance, Chapter, ClassPeriod, Event, Fee, GalleryItem, Goal, Mark,
                       Payment, School, Staff, Student, Subject, User)
 from . import attendance
 from ..schemas import FeeIn, MarkIn, PaymentIn, StaffIn, StudentIn
@@ -79,6 +80,30 @@ def dashboard(year: Optional[str] = None, user: User = Depends(staff_side), db: 
     return d
 
 
+# ---------- attendance badge helper ----------
+
+def _att_pct_map(db: Session, school_id: int, student_ids: list[int]) -> dict[int, float | None]:
+    """Return attendance percentage (0-100, rounded) for the given student IDs for the current year.
+    Students with no records get None."""
+    if not student_ids:
+        return {}
+    rows = db.execute(
+        select(Attendance.student_id,
+               func.count().label("total"),
+               func.sum(case((Attendance.status == "P", 1), else_=0)).label("present"))
+        .where(
+            Attendance.school_id == school_id,
+            Attendance.student_id.in_(student_ids),
+        )
+        .group_by(Attendance.student_id)
+    ).all()
+    result: dict[int, float | None] = {sid: None for sid in student_ids}
+    for sid, total, present in rows:
+        if total and total > 0:
+            result[sid] = round((present / total) * 100, 1)
+    return result
+
+
 # ---------- students ----------
 @router.get("/students")
 def list_students(
@@ -104,6 +129,7 @@ def list_students(
                       .offset((page - 1) * page_size).limit(page_size)).all()
     overall = analytics.student_overall_map(db, user.school_id, year) if full else {}
     fees = analytics.fee_pending_map(db, user.school_id, year) if fee_ok else {}
+    att_pct = _att_pct_map(db, user.school_id, [s.id for s in rows]) if full else {}
     items = []
     for s in rows:
         row = {"id": s.id, "name": s.name, "grade": s.grade, "section": s.section,
@@ -111,7 +137,8 @@ def list_students(
         if full:  # classmates/others only get the basic directory view above
             row.update(admission_no=s.admission_no, gender=s.gender, guardian_name=s.guardian_name, phone=s.phone,
                        overall_pct=overall.get(s.id),
-                       letter=analytics.grade_letter(overall[s.id]) if s.id in overall else None)
+                       letter=analytics.grade_letter(overall[s.id]) if s.id in overall else None,
+                       att_pct=att_pct.get(s.id))
         if fee_ok:
             row["fee_pending"] = round(fees[s.id]["pending"], 2) if s.id in fees else 0
         items.append(row)
@@ -445,6 +472,44 @@ def update_staff(sid: int, data: StaffIn, user: User = Depends(need("staff.manag
         setattr(s, k, v)
     db.commit()
     return _staff_out(s)
+
+
+class ClassHeadIn(BaseModel):
+    grade: str = Field(min_length=1, max_length=5)
+    section: str = Field(pattern=r"^[A-Z]$")
+
+
+@router.put("/staff/{sid}/class-head", status_code=204)
+def set_class_head(sid: int, data: ClassHeadIn, user: User = Depends(school_user),
+                   db: Session = Depends(get_db)):
+    """Owner/admin assigns a staff member as the class head (section head) for a grade-section.
+    Clears any existing class head for that section first so there is only ever one."""
+    if user.role not in ("admin",) and "staff.manage" not in perm_set(user):
+        raise HTTPException(403, "Only admin or staff managers can set a class head")
+    s = get_owned(db, Staff, sid, user.school_id)
+    key = f"{data.grade}{data.section}"
+    # Clear any other staff currently marked as class head of this section
+    for other in db.scalars(
+        select(Staff).where(
+            Staff.school_id == user.school_id,
+            Staff.class_teacher_of == key,
+            Staff.id != sid,
+        )
+    ):
+        other.class_teacher_of = None
+    s.class_teacher_of = key
+    db.commit()
+
+
+@router.delete("/staff/{sid}/class-head", status_code=204)
+def remove_class_head(sid: int, user: User = Depends(school_user),
+                      db: Session = Depends(get_db)):
+    """Remove the class head designation from a staff member."""
+    if user.role not in ("admin",) and "staff.manage" not in perm_set(user):
+        raise HTTPException(403, "Only admin or staff managers can remove a class head")
+    s = get_owned(db, Staff, sid, user.school_id)
+    s.class_teacher_of = None
+    db.commit()
 
 
 @router.delete("/staff/{sid}", status_code=204)

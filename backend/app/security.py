@@ -39,6 +39,7 @@ PERMISSIONS = {
     "attendance.manage": "Mark attendance and see attendance reports",
     "announcements.manage": "Post and manage school announcements",
     "timetable.manage": "Create and edit the class timetable",
+    "timetable.self_edit": "Edit own timetable slots (teacher swap) — owner is notified",
     "leaves.manage": "Approve or reject staff leave applications",
     "holidays.manage": "Add and edit the school holiday calendar",
 }

@@ -1,4 +1,4 @@
-"""Timetable (class periods) — CRUD + bulk operations + demo seed + teacher notifications.
+"""Timetable (class periods) — CRUD + bulk operations + demo seed + teacher notifications + self-edit.
 
 Endpoints:
   GET    /timetable/meta            subjects-by-grade, staff, sections-by-grade
@@ -21,9 +21,9 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import (DAYS_OF_WEEK, GRADES, ClassPeriod, DirectMessage,
-                      Staff, Student, Subject, User)
+                      Staff, Student, Subject, TimetableLog, User)
 from ..schemas import ClassPeriodIn
-from ..security import need, school_user
+from ..security import need, perm_set, school_user
 
 router = APIRouter(prefix="/api")
 
@@ -475,6 +475,155 @@ def seed_demo(
         "grades": len(GRADES),
         "sections": len(sections),
     }
+
+
+# ─────────────────────────── teacher self-edit ────────────────────────────────
+
+class SelfEditIn(BaseModel):
+    """A teacher can swap the subject/staff on one of their own period slots.
+    They cannot change grade, section, day, period number, or times — only subject and assigned teacher.
+    Every change is logged and the owner is notified via DM."""
+    subject_id: Optional[int] = None
+    staff_id: Optional[int] = None   # The teacher can reassign the slot to another staff
+
+
+@router.put("/timetable/{pid}/self-edit")
+def teacher_self_edit(
+    pid: int,
+    data: SelfEditIn,
+    user: User = Depends(school_user),
+    db: Session = Depends(get_db),
+):
+    """Teacher self-edit: allowed if the period belongs to their assigned class
+    (they are the current staff for that period) OR they hold timetable.self_edit permission."""
+    perms = perm_set(user)
+    if "timetable.manage" in perms:
+        raise HTTPException(422, "Use the main timetable endpoint instead — you have full timetable access")
+    if "timetable.self_edit" not in perms:
+        raise HTTPException(403, "You do not have permission to edit the timetable")
+
+    p = _get(db, user.school_id, pid)
+
+    # Teacher may only edit periods currently assigned to themselves
+    if p.staff_id != user.staff_id:
+        raise HTTPException(403, "You can only edit periods assigned to you")
+
+    # Validate refs if supplied
+    old_subj: Optional[Subject] = db.get(Subject, p.subject_id) if p.subject_id else None
+    old_staff: Optional[Staff] = db.get(Staff, p.staff_id) if p.staff_id else None
+
+    new_subj: Optional[Subject] = None
+    if data.subject_id is not None:
+        new_subj = db.scalar(select(Subject).where(
+            Subject.id == data.subject_id, Subject.school_id == user.school_id))
+        if not new_subj:
+            raise HTTPException(422, "Subject not found in this school")
+
+    new_staff: Optional[Staff] = None
+    if data.staff_id is not None:
+        new_staff = db.scalar(select(Staff).where(
+            Staff.id == data.staff_id, Staff.school_id == user.school_id))
+        if not new_staff:
+            raise HTTPException(422, "Staff member not found in this school")
+
+    # Write audit log entry BEFORE applying changes
+    log_entry = TimetableLog(
+        school_id=user.school_id,
+        period_id=p.id,
+        actor_user_id=user.id,
+        actor_name=user.full_name,
+        grade=p.grade,
+        section=p.section,
+        day_of_week=p.day_of_week,
+        period_number=p.period_number,
+        old_subject=old_subj.name if old_subj else None,
+        new_subject=new_subj.name if new_subj else (old_subj.name if old_subj else None),
+        old_staff=old_staff.name if old_staff else None,
+        new_staff=new_staff.name if new_staff else (old_staff.name if old_staff else None),
+    )
+    db.add(log_entry)
+
+    # Apply changes
+    if data.subject_id is not None:
+        p.subject_id = data.subject_id
+    if data.staff_id is not None:
+        p.staff_id = data.staff_id
+
+    # Notify owner (admin role) and notify old teacher if reassigned to someone else
+    changed_staff = data.staff_id is not None and data.staff_id != (old_staff.id if old_staff else None)
+    subj_name = new_subj.name if new_subj else (old_subj.name if old_subj else "")
+
+    msg = (
+        f"📅 Timetable self-edit by {user.full_name}: "
+        f"Class {p.grade}-{p.section}, {p.day_of_week} Period {p.period_number}"
+        f"{f' — subject changed to {subj_name}' if data.subject_id is not None else ''}"
+        f"{f' — reassigned to {new_staff.name}' if new_staff else ''}."
+    )
+
+    # Notify all active admins
+    admins = db.scalars(
+        select(User).where(
+            User.school_id == user.school_id,
+            User.role == "admin",
+            User.active.is_(True),
+        )
+    ).all()
+    for admin in admins:
+        if admin.id != user.id:
+            db.add(DirectMessage(
+                school_id=user.school_id, sender_id=user.id,
+                recipient_id=admin.id, body=msg,
+            ))
+
+    # Notify newly assigned teacher if different from actor
+    if new_staff and new_staff.id != user.staff_id:
+        _notify(db, user, new_staff.id,
+                f"📅 Timetable update: You have been assigned to "
+                f"Class {p.grade}-{p.section}, {p.day_of_week} Period {p.period_number}"
+                f"{f' ({subj_name})' if subj_name else ''}.")
+
+    db.commit()
+    return {"ok": True, "period_id": p.id}
+
+
+@router.get("/timetable/logs")
+def list_timetable_logs(
+    grade: Optional[str] = None,
+    section: Optional[str] = None,
+    user: User = Depends(school_user),
+    db: Session = Depends(get_db),
+):
+    """Owner/admin can view all teacher self-edit log entries.  Staff can see their own."""
+    perms = perm_set(user)
+    is_manager = user.role == "admin" or "timetable.manage" in perms
+
+    stmt = select(TimetableLog).where(TimetableLog.school_id == user.school_id)
+    if not is_manager:
+        # staff only see their own changes
+        stmt = stmt.where(TimetableLog.actor_user_id == user.id)
+    if grade:
+        stmt = stmt.where(TimetableLog.grade == grade)
+    if section:
+        stmt = stmt.where(TimetableLog.section == section.upper()[:1])
+    stmt = stmt.order_by(TimetableLog.changed_at.desc()).limit(200)
+    rows = db.scalars(stmt).all()
+    return [
+        {
+            "id": r.id,
+            "period_id": r.period_id,
+            "actor_name": r.actor_name,
+            "grade": r.grade,
+            "section": r.section,
+            "day_of_week": r.day_of_week,
+            "period_number": r.period_number,
+            "old_subject": r.old_subject,
+            "new_subject": r.new_subject,
+            "old_staff": r.old_staff,
+            "new_staff": r.new_staff,
+            "changed_at": r.changed_at.isoformat() + "Z",
+        }
+        for r in rows
+    ]
 
 
 # ─────────────────────────── helpers ──────────────────────────────────────────

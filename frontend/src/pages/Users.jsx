@@ -282,9 +282,16 @@ function StudentSection({ students, session, actions, onAdd }) {
             <div className="small muted">Students can only view their own profile, marks and attendance</div>
           </div>
         </div>
-        <button className="btn sm" onClick={onAdd}>
-          <Plus size={14} /> Add student login
-        </button>
+        <div className="row" style={{ gap: 8 }}>
+          <div className="search" style={{ margin: 0 }}>
+            <Search size={14} />
+            <input placeholder="Search students…" value={q} onChange={(e) => setQ(e.target.value)}
+              style={{ width: 160 }} />
+          </div>
+          <button className="btn sm" onClick={onAdd}>
+            <Plus size={14} /> Add student login
+          </button>
+        </div>
       </div>
 
       {/* Filters */}

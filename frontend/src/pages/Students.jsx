@@ -7,6 +7,14 @@ import { SECTIONS, studentFields } from "../forms.js";
 import ImportStudents from "../components/ImportStudents.jsx";
 import { Async, Badge, DownloadButton, FormModal, PageHead, Photo, Secret, tone, useLoad } from "../components/ui.jsx";
 
+/** Attendance percentage badge: 🏅 95+  🥇 90+  🎖️ 80+  otherwise plain % */
+function AttBadge({ pct }) {
+  if (pct == null) return <span className="muted">–</span>;
+  const medal = pct >= 95 ? "🏅" : pct >= 90 ? "🥇" : pct >= 80 ? "🎖️" : null;
+  const kind = pct >= 90 ? "good" : pct >= 75 ? "warn" : "bad";
+  return <Badge kind={kind}>{medal && `${medal} `}{pct}%</Badge>;
+}
+
 export default function Students() {
   const nav = useNavigate();
   const { can } = useAuth();
@@ -62,7 +70,7 @@ export default function Students() {
               <thead>
                 <tr>
                   <th>Student</th><th>Class</th>
-                  {d.detailed && <><th>Guardian</th><th>Overall</th></>}
+                  {d.detailed && <><th>Guardian</th><th>Overall</th><th>Attendance</th></>}
                   {d.items[0]?.fee_pending !== undefined && <th>Fee pending</th>}
                 </tr>
               </thead>
@@ -76,6 +84,7 @@ export default function Students() {
                       <>
                         <td>{s.guardian_name}<div className="small muted">{s.phone}</div></td>
                         <td>{s.overall_pct == null ? <span className="muted">–</span> : <Badge kind={tone(s.overall_pct)}>{s.overall_pct}% · {s.letter}</Badge>}</td>
+                        <td><AttBadge pct={s.att_pct} /></td>
                       </>
                     )}
                     {s.fee_pending !== undefined && <td>{s.fee_pending > 0 ? <Badge kind="warn">{inr(s.fee_pending)}</Badge> : <Badge kind="good">Clear</Badge>}</td>}

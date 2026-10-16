@@ -345,6 +345,26 @@ class StaffLeave(Base):
     reviewed_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime, nullable=True)
 
 
+class TimetableLog(Base):
+    """Audit trail for timetable modifications made by teachers (self-edit).
+    Owner / admin can view these to track who changed what."""
+    __tablename__ = "timetable_logs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
+    period_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)   # NULL if period was deleted
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    actor_name: Mapped[str] = mapped_column(String(100))                        # snapshot so it survives user deletion
+    grade: Mapped[str] = mapped_column(String(5))
+    section: Mapped[str] = mapped_column(String(2))
+    day_of_week: Mapped[str] = mapped_column(String(3))
+    period_number: Mapped[int] = mapped_column(Integer)
+    old_subject: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    new_subject: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    old_staff: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    new_staff: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    changed_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+
+
 class Holiday(Base):
     """A school holiday / non-working day. Visible to all school members."""
     __tablename__ = "holidays"

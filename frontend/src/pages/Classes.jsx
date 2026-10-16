@@ -8,7 +8,7 @@
  */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { BookOpen, Clock, Copy, Database, Eraser, Pencil, Plus, Trash2, User as UserIcon, Zap } from "lucide-react";
+import { BookOpen, Clock, Copy, Database, Eraser, History, Pencil, Plus, Trash2, User as UserIcon, Zap } from "lucide-react";
 import { api, GRADES, gradeLabel } from "../api.js";
 import { SECTIONS } from "../forms.js";
 import { useAuth } from "../auth.jsx";
@@ -33,6 +33,70 @@ function subjectColor(name) {
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
+// ── Change Log panel ──────────────────────────────────────────────────────────
+function ChangeLog() {
+  const [logs, setLogs] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const data = await api("/timetable/logs");
+      setLogs(data);
+    } catch (_) { setLogs([]); }
+    finally { setLoading(false); }
+  }
+
+  function toggle() {
+    if (!open && logs === null) load();
+    setOpen((v) => !v);
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 28 }}>
+      <button className="btn ghost sm" style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={toggle}>
+        <History size={14} /> {open ? "Hide" : "Show"} teacher change log
+      </button>
+      {open && (
+        <div style={{ marginTop: 12 }}>
+          {loading && <div className="muted small">Loading…</div>}
+          {!loading && logs?.length === 0 && <div className="muted small">No teacher self-edits recorded yet.</div>}
+          {!loading && logs?.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>When</th><th>Teacher</th><th>Class</th><th>Day · Period</th>
+                    <th>Subject before</th><th>Subject after</th><th>Staff change</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {logs.map((l) => (
+                    <tr key={l.id}>
+                      <td className="small muted">{l.changed_at.slice(0, 16).replace("T", " ")}</td>
+                      <td><b>{l.actor_name}</b></td>
+                      <td><span className="chip">{l.grade}-{l.section}</span></td>
+                      <td>{l.day_of_week} · P{l.period_number}</td>
+                      <td className="muted small">{l.old_subject || "–"}</td>
+                      <td>{l.new_subject !== l.old_subject ? <b>{l.new_subject || "–"}</b> : <span className="muted small">{l.new_subject || "–"}</span>}</td>
+                      <td className="small">
+                        {l.old_staff !== l.new_staff
+                          ? <span>{l.old_staff || "–"} → <b>{l.new_staff || "–"}</b></span>
+                          : <span className="muted">–</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Classes() {
   const { can, role } = useAuth();
   const canManage = role === "admin" || can("timetable.manage");
@@ -266,6 +330,9 @@ export default function Classes() {
       {dlg?.type === "seed" && (
         <SeedModal onClose={() => setDlg(null)} onSeed={async () => { await seedDemo(); setDlg(null); }} busy={seedBusy} />
       )}
+
+      {/* ── Change log (admin only) ────────────────────────────────────── */}
+      {canManage && <ChangeLog />}
     </>
   );
 }

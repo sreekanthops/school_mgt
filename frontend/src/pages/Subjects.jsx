@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { BookOpen, Pencil, Plus, Trash2 } from "lucide-react";
+import { BookOpen, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { api, gradeLabel } from "../api.js";
 import { Async, Badge, Confirm, FormModal, PageHead, useLoad } from "../components/ui.jsx";
 
