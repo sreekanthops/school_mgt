@@ -20,15 +20,21 @@ PAGE = 200
 
 def _contact(db: Session, u: User) -> dict:
     out = {"id": u.id, "name": u.full_name, "role": u.role, "subtitle": u.role.capitalize(),
-           "photo": None}
+           "photo": None, "staff_id": u.staff_id, "student_id": u.student_id,
+           "grade": None, "section": None, "admission_no": None, "designation": None, "employee_id": None}
     if u.staff_id and (s := db.get(Staff, u.staff_id)):
         out["subtitle"] = s.designation
+        out["designation"] = s.designation
+        out["employee_id"] = s.employee_id
         out["photo"] = {"kind": "staff", "id": s.id, "has": bool(s.photo), "v": storage.version(s.photo)}
     elif u.student_id and (st := db.get(Student, u.student_id)):
-        out["subtitle"] = f"Student · Class {st.grade}-{st.section}"
+        out["subtitle"] = f"Class {st.grade}-{st.section} · {st.admission_no}"
+        out["grade"] = st.grade
+        out["section"] = st.section
+        out["admission_no"] = st.admission_no
         out["photo"] = {"kind": "students", "id": st.id, "has": bool(st.photo), "v": storage.version(st.photo)}
     elif u.role == "admin":
-        out["subtitle"] = "School owner"
+        out["subtitle"] = "School owner / Admin"
     return out
 
 

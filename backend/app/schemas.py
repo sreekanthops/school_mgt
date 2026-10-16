@@ -3,7 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .models import GRADES
+from .models import DAYS_OF_WEEK, GRADES
 
 EMAIL = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
 PHONE = r"^[0-9+\-\s]{7,20}$"
@@ -30,7 +30,7 @@ class SchoolIn(BaseModel):
     founded: Optional[str] = Field(default=None, max_length=10)
 
 
-PLANS = ("Free", "Standard", "Premium")
+PLANS = ("Free", "Starter", "Standard", "Premium")
 
 
 class SchoolAdminIn(BaseModel):
@@ -213,4 +213,33 @@ class MessageIn(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("message is empty")
+        return v
+
+
+TIME_RE = r"^([01]\d|2[0-3]):[0-5]\d$"  # HH:MM
+
+
+class ClassPeriodIn(BaseModel):
+    grade: str
+    section: str = Field(pattern=r"^[A-Z]$")
+    day_of_week: str
+    period_number: int = Field(ge=1, le=99)  # 1-20 = teaching, 90/91 reserved for breaks
+    start_time: Optional[str] = Field(default=None, pattern=TIME_RE)
+    end_time: Optional[str] = Field(default=None, pattern=TIME_RE)
+    subject_id: Optional[int] = None
+    staff_id: Optional[int] = None
+    label: Optional[str] = Field(default=None, max_length=40)
+
+    @field_validator("grade")
+    @classmethod
+    def _grade(cls, v: str) -> str:
+        if v not in GRADES:
+            raise ValueError("invalid grade")
+        return v
+
+    @field_validator("day_of_week")
+    @classmethod
+    def _day(cls, v: str) -> str:
+        if v not in DAYS_OF_WEEK:
+            raise ValueError("invalid day")
         return v

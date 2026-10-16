@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 from .. import analytics, storage
 from ..db import get_db
 from ..deps import can_see_fees, can_see_student, get_owned, get_student, next_code, staff_letter, year_of
-from ..models import EXAM_MAX, Chapter, Event, Fee, GalleryItem, Goal, Mark, Payment, School, Staff, Student, Subject, User
+from ..models import (EXAM_MAX, Chapter, ClassPeriod, Event, Fee, GalleryItem, Goal, Mark,
+                      Payment, School, Staff, Student, Subject, User)
 from . import attendance
 from ..schemas import FeeIn, MarkIn, PaymentIn, StaffIn, StudentIn
 from ..security import (PRINCIPAL_DEFAULT, TEACHER_DEFAULT, gen_password, hash_password, need, perm_set, school_user,
@@ -379,6 +380,31 @@ def staff_detail(sid: int, user: User = Depends(school_user), db: Session = Depe
     out["teaches"] = [{"id": x.id, "name": x.name, "grade": x.grade} for x in db.scalars(
         select(Subject).where(Subject.school_id == user.school_id, Subject.name.in_(names))
         .order_by(Subject.grade, Subject.name))] if names else []
+    # timetable schedule for this staff member
+    periods = db.scalars(
+        select(ClassPeriod).where(ClassPeriod.school_id == user.school_id,
+                                  ClassPeriod.staff_id == sid)
+        .order_by(ClassPeriod.day_of_week, ClassPeriod.period_number)
+    ).all()
+    subj_ids = {p.subject_id for p in periods if p.subject_id}
+    subj_map: dict[int, Subject] = {x.id: x for x in db.scalars(
+        select(Subject).where(Subject.id.in_(subj_ids)))} if subj_ids else {}
+    out["schedule"] = [
+        {
+            "id": p.id,
+            "grade": p.grade,
+            "section": p.section,
+            "day_of_week": p.day_of_week,
+            "period_number": p.period_number,
+            "start_time": p.start_time,
+            "end_time": p.end_time,
+            "subject": ({"id": subj_map[p.subject_id].id, "name": subj_map[p.subject_id].name}
+                        if p.subject_id and p.subject_id in subj_map else None),
+            "label": p.label,
+        }
+        for p in periods
+        if p.period_number < 90  # skip break slots
+    ]
     return out
 
 

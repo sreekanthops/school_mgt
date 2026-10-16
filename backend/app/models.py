@@ -93,6 +93,8 @@ class User(Base):
     recovery_hashes: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     # set when an admin/IT person issues a temporary password; the user must choose their own before anything else
     must_change: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # owner-only: Gmail address used to receive a password-reset link when security questions cannot be answered
+    recovery_email: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
 
 class Subject(Base):
@@ -294,6 +296,61 @@ class AnnouncementRead(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     announcement_id: Mapped[int] = mapped_column(ForeignKey("announcements.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+
+DAYS_OF_WEEK = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+
+
+class ClassPeriod(Base):
+    """One scheduled slot on the weekly timetable: grade × section × day × period."""
+    __tablename__ = "class_periods"
+    __table_args__ = (UniqueConstraint("school_id", "grade", "section", "day_of_week", "period_number"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
+    grade: Mapped[str] = mapped_column(String(5), index=True)
+    section: Mapped[str] = mapped_column(String(2))
+    day_of_week: Mapped[str] = mapped_column(String(3))      # Mon..Sat
+    period_number: Mapped[int] = mapped_column(Integer)       # 1-based
+    start_time: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)  # "HH:MM"
+    end_time: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
+    subject_id: Mapped[Optional[int]] = mapped_column(ForeignKey("subjects.id", ondelete="SET NULL"), nullable=True)
+    staff_id: Mapped[Optional[int]] = mapped_column(ForeignKey("staff.id", ondelete="SET NULL"), nullable=True)
+    label: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)  # e.g. "Break", "Assembly"
+
+
+LEAVE_STATUS = ("pending", "approved", "rejected")
+LEAVE_TYPES = ("Casual", "Sick", "Earned", "Maternity", "Paternity", "Unpaid", "Other")
+
+
+class StaffLeave(Base):
+    """A leave application submitted by a staff member."""
+    __tablename__ = "staff_leaves"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
+    staff_id: Mapped[int] = mapped_column(ForeignKey("staff.id", ondelete="CASCADE"), index=True)
+    from_date: Mapped[dt.date] = mapped_column(Date, index=True)
+    to_date: Mapped[dt.date] = mapped_column(Date)
+    leave_type: Mapped[str] = mapped_column(String(20))       # Casual | Sick | Earned …
+    reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    status: Mapped[str] = mapped_column(String(10), default="pending")  # pending | approved | rejected
+    reviewed_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    review_note: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    applied_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    reviewed_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class Holiday(Base):
+    """A school holiday / non-working day. Visible to all school members."""
+    __tablename__ = "holidays"
+    __table_args__ = (UniqueConstraint("school_id", "date"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    school_id: Mapped[int] = _school_fk()
+    date: Mapped[dt.date] = mapped_column(Date, index=True)
+    name: Mapped[str] = mapped_column(String(120))            # "Diwali", "Independence Day" …
+    description: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    # "national" | "regional" | "school" — for display colour coding
+    category: Mapped[str] = mapped_column(String(20), default="school")
 
 
 ATTENDANCE_STATUS = ("P", "A", "L")  # present | absent | late

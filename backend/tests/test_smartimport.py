@@ -325,8 +325,10 @@ def test_permissions(client, world):
     assert client.post("/api/import/upload", content=f).status_code == 401
     # a staff member with only students.manage can import students but not fees
     with SessionLocal() as db:
+        owner = db.scalar(select(User).where(User.username == "ownerA"))
         db.add(User(school_id=world["a"], username="mgr", role="staff", full_name="M", permissions="students.manage",
-                    password_hash=db.scalar(select(User.password_hash).where(User.username == "ownerA"))))
+                    password_hash=owner.password_hash, recovery_hashes=owner.recovery_hashes,
+                    recovery_q=owner.recovery_q))
         db.commit()
     h = login(client, "mgr")
     j = up(client, h, xlsx({**{"Students": [STU, ["Ravi Kumar", "M", "12/03/2013", "6", "A", "Suresh Kumar", "9000000001", "1"]]},

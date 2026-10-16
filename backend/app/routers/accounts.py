@@ -21,12 +21,21 @@ log = logging.getLogger("school.admin")
 
 def _me(user: User, db: Session) -> dict:
     school = db.get(School, user.school_id) if user.school_id else None
+    # Recovery setup is mandatory for every non-student, non-superadmin user AFTER they have
+    # chosen their own password (must_change == False).  Students have no security questions.
+    must_setup_recovery = (
+        not bool(user.must_change)
+        and not bool(user.recovery_hashes)
+        and user.role not in ("student", "superadmin")
+    )
     return {
         "id": user.id, "username": user.username, "name": user.full_name, "role": user.role,
         "permissions": sorted(perm_set(user)), "student_id": user.student_id, "staff_id": user.staff_id,
         "school": {"id": school.id, "name": school.name} if school else None,
         # reminders and the read-only lock apply to owners and staff only, never to students
-        "must_change": bool(user.must_change), "recovery_set": bool(user.recovery_hashes),
+        "must_change": bool(user.must_change),
+        "recovery_set": bool(user.recovery_hashes),
+        "must_setup_recovery": must_setup_recovery,
         "subscription": subscription_info(school.subscription_end) if school and user.role != "student" else None,
     }
 
@@ -90,10 +99,11 @@ def update_school(data: SchoolIn, user: User = Depends(need("school.manage")), d
 
 
 # ---------- users & permissions (tenant) ----------
-def _user_out(u: User) -> dict:
+def _user_out(u: User, grade: str | None = None, section: str | None = None) -> dict:
     return {"id": u.id, "username": u.username, "full_name": u.full_name, "role": u.role,
             "permissions": sorted(perm_set(u)) if u.role == "staff" else (["all"] if u.role == "admin" else []),
-            "student_id": u.student_id, "staff_id": u.staff_id, "active": u.active}
+            "student_id": u.student_id, "staff_id": u.staff_id, "active": u.active,
+            "grade": grade, "section": section}
 
 
 def _check_perms(actor: User, perms: list[str]) -> str:
@@ -119,8 +129,17 @@ def _target(db: Session, actor: User, uid: int) -> User:
 
 @router.get("/users")
 def list_users(actor: User = Depends(need("users.manage")), db: Session = Depends(get_db)):
-    rows = db.scalars(select(User).where(User.school_id == actor.school_id).order_by(User.role, User.username))
-    return [_user_out(u) for u in rows]
+    rows = db.scalars(select(User).where(User.school_id == actor.school_id).order_by(User.role, User.username)).all()
+    # build a single-query student lookup for grade/section
+    student_ids = [u.student_id for u in rows if u.student_id]
+    stu_map: dict[int, Student] = {}
+    if student_ids:
+        for st in db.scalars(select(Student).where(Student.id.in_(student_ids))):
+            stu_map[st.id] = st
+    def _out(u: User):
+        st = stu_map.get(u.student_id) if u.student_id else None
+        return _user_out(u, grade=st.grade if st else None, section=st.section if st else None)
+    return [_out(u) for u in rows]
 
 
 @router.post("/users", status_code=201)
@@ -148,8 +167,11 @@ def create_user(data: UserIn, actor: User = Depends(need("users.manage")), db: S
     if not username:
         raise HTTPException(422, "Username is required for staff without a staff profile")
     pw = gen_password()
+    # Students are not forced to change their temp password (they may not manage this themselves).
+    # All other roles (admin, staff) must change their temp password on first login, and then set up recovery.
     u = User(school_id=actor.school_id, username=username, password_hash=hash_password(pw), role=data.role,
-             full_name=data.full_name, permissions=perms, student_id=student_id, staff_id=staff_id)
+             full_name=data.full_name, permissions=perms, student_id=student_id, staff_id=staff_id,
+             must_change=(data.role != "student"))
     db.add(u)
     try:
         db.commit()

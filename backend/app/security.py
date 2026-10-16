@@ -38,6 +38,9 @@ PERMISSIONS = {
     "users.manage": "Create users and set their permissions",
     "attendance.manage": "Mark attendance and see attendance reports",
     "announcements.manage": "Post and manage school announcements",
+    "timetable.manage": "Create and edit the class timetable",
+    "leaves.manage": "Approve or reject staff leave applications",
+    "holidays.manage": "Add and edit the school holiday calendar",
 }
 ALL_PERMS = set(PERMISSIONS)
 TEACHER_DEFAULT = ["students.view", "marks.edit", "attendance.manage"]
@@ -151,6 +154,13 @@ def school_user(request: Request, user: User = Depends(current_user), db: Sessio
         raise HTTPException(403, "This school account is disabled")
     if user.must_change and not request.url.path.startswith("/api/auth"):
         raise HTTPException(403, "Please change your temporary password first")
+    must_setup_recovery = (
+        not bool(user.must_change)
+        and not bool(user.recovery_hashes)
+        and user.role not in ("student", "superadmin")
+    )
+    if must_setup_recovery and not request.url.path.startswith("/api/auth"):
+        raise HTTPException(403, "Please set up your password recovery questions first")
     if (user.role != "student" and request.method not in SAFE_METHODS
             and subscription_info(school.subscription_end)["locked"]
             and not request.url.path.startswith(LOCK_EXEMPT)):

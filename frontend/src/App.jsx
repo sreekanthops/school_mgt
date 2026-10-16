@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import {
-  AlertTriangle, BookOpen, Building2, CalendarCheck, FileUp, Megaphone, Receipt, Lightbulb, CalendarDays, GraduationCap, Images, Info, KeyRound, LayoutDashboard, LogOut, Menu,
+  AlertTriangle, BookOpen, Building2, CalendarCheck, CalendarClock, CalendarRange, ClipboardList, FileUp, Megaphone, Receipt, Lightbulb, CalendarDays, GraduationCap, Images, Info, KeyRound, LayoutDashboard, LogOut, Menu,
   MessagesSquare, ShieldCheck, Target, UserCircle, Users, Wallet, Camera, GraduationCap as Logo,
 } from "lucide-react";
 import { api } from "./api.js";
@@ -10,6 +10,7 @@ import Chatbot from "./components/Chatbot.jsx";
 import { Photo } from "./components/ui.jsx";
 import ForgotPassword from "./pages/ForgotPassword.jsx";
 import Login from "./pages/Login.jsx";
+import ResetOwnerPassword from "./pages/ResetOwnerPassword.jsx";
 
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
 const Students = lazy(() => import("./pages/Students.jsx"));
@@ -32,8 +33,11 @@ const Messages = lazy(() => import("./pages/Messages.jsx"));
 const Board = lazy(() => import("./pages/Board.jsx"));
 const Announcements = lazy(() => import("./pages/Announcements.jsx"));
 const Attendance = lazy(() => import("./pages/Attendance.jsx"));
+const Classes = lazy(() => import("./pages/Classes.jsx"));
 const NewYear = lazy(() => import("./pages/NewYear.jsx"));
 const SmartImport = lazy(() => import("./pages/SmartImport.jsx"));
+const Holidays = lazy(() => import("./pages/Holidays.jsx"));
+const Leaves = lazy(() => import("./pages/Leaves.jsx"));
 const MyBilling = lazy(() => import("./components/Billing.jsx").then((m) => ({ default: m.MyBilling })));
 
 /** [path, label, icon, visible(auth) , group] */
@@ -43,6 +47,7 @@ const NAV = [
   ["/students", "Students", GraduationCap, (a) => !a.isSuper, "School"],
   ["/staff", "Staff", Users, (a) => !a.isSuper, "School"],
   ["/subjects", "Subjects", BookOpen, (a) => !a.isSuper, "School"],
+  ["/classes", "Timetable", CalendarClock, (a) => !a.isSuper && !a.isStudent, "School"],
   ["/attendance", "Attendance", CalendarCheck, (a) => a.can("attendance.manage") || a.can("students.view"), "School"],
   ["/fees", "Fees", Wallet, (a) => a.can("fees.view") || a.can("fees.manage"), "School"],
   ["/announcements", "Announcements", Megaphone, (a) => !a.isSuper, "Campus"],
@@ -51,7 +56,9 @@ const NAV = [
   ["/events", "Events", CalendarDays, (a) => !a.isSuper, "Campus"],
   ["/gallery", "Gallery", Images, (a) => !a.isSuper, "Campus"],
   ["/goals", "Future Goals", Target, (a) => !a.isSuper, "Campus"],
+  ["/holidays", "Holidays", CalendarRange, (a) => !a.isSuper, "Campus"],
   ["/about", "About School", Info, (a) => !a.isSuper, "Campus"],
+  ["/leaves", "Staff Leaves", ClipboardList, (a) => !a.isSuper && !a.isStudent, "Admin"],
   ["/import", "Smart Import", FileUp, (a) => a.can("students.manage") || a.can("staff.manage") || a.can("fees.manage") || a.can("subjects.manage") || a.can("content.manage") || a.can("marks.edit"), "Admin"],
   ["/approvals", "Photo Approvals", Camera, (a) => a.can("photos.approve"), "Admin"],
   ["/users", "Users & Access", ShieldCheck, (a) => a.can("users.manage"), "Admin"],
@@ -83,8 +90,10 @@ function Shell() {
   const [pending, setPending] = useState(0);
   const [unread, setUnread] = useState(0);
   const [notices, setNotices] = useState(0);
+  const [setupPrompt, setSetupPrompt] = useState(false);
   const loc = useLocation();
   useEffect(() => setOpen(false), [loc.pathname]);
+  useEffect(() => setSetupPrompt(false), [loc.pathname]);
   // pick up a renewal (or a new reminder stage) without needing to sign out and in
   useEffect(() => {
     if (session && !isSuper && !isStudent) auth.refresh().catch(() => {});
@@ -104,6 +113,9 @@ function Shell() {
   }, [session, isSuper, loc.pathname]);
   if (!session) return <Navigate to="/login" replace />;
   if (session.must_change && loc.pathname !== "/account") return <Navigate to="/account" replace />;
+  if (session.must_setup_recovery && loc.pathname !== "/account") return <Navigate to="/account" replace />;
+
+  const setupPending = !!(session.must_change || session.must_setup_recovery);
 
   const locked = !!session.subscription?.locked;
   const items = NAV.filter((n) => n[3](auth));
@@ -116,17 +128,31 @@ function Shell() {
           <div>{isSuper ? "Platform Console" : session.school?.name}<small>School Management Suite</small></div>
         </div>
         <nav className="nav">
+          {setupPending && (
+            <div className="setup-nav-notice">
+              <span>⚠ Complete account setup to unlock all menus</span>
+            </div>
+          )}
           {groups.map((g) => (
             <div key={g}>
               <div className="nav-group">{g}</div>
-              {items.filter((n) => n[4] === g).map(([to, label, Icon]) => (
-                <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => (isActive ? "active" : "")}>
-                  <Icon size={18} /> {label}
-                  {to === "/approvals" && pending > 0 && <span className="count">{pending}</span>}
-                  {to === "/messages" && unread > 0 && <span className="count">{unread}</span>}
-                  {to === "/announcements" && notices > 0 && loc.pathname !== "/announcements" && <span className="count">{notices}</span>}
-                </NavLink>
-              ))}
+              {items.filter((n) => n[4] === g).map(([to, label, Icon]) => {
+                const isAccount = to === "/account";
+                const blocked = setupPending && !isAccount;
+                return blocked ? (
+                  <button key={to} className="nav-blocked" onClick={() => setSetupPrompt(true)}
+                    title="Complete account setup first">
+                    <Icon size={18} /> {label}
+                  </button>
+                ) : (
+                  <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => (isActive ? "active" : "")}>
+                    <Icon size={18} /> {label}
+                    {to === "/approvals" && pending > 0 && <span className="count">{pending}</span>}
+                    {to === "/messages" && unread > 0 && <span className="count">{unread}</span>}
+                    {to === "/announcements" && notices > 0 && loc.pathname !== "/announcements" && <span className="count">{notices}</span>}
+                  </NavLink>
+                );
+              })}
             </div>
           ))}
         </nav>
@@ -142,6 +168,17 @@ function Shell() {
           <b>{isSuper ? "Platform Console" : session.school?.name}</b>
         </div>
         <SubscriptionBanner sub={session.subscription} />
+        {setupPrompt && (
+          <div className="setup-banner" role="alert">
+            <span>
+              {session.must_change
+                ? "⚠ You must change your temporary password before you can use the system."
+                : "⚠ You must set up your password recovery questions before you can use the system."}
+              {" "}Go to <a href="/account" style={{ color: "inherit", fontWeight: 700, textDecoration: "underline" }}>My Account</a> to complete setup.
+            </span>
+            <button onClick={() => setSetupPrompt(false)} style={{ background: "none", border: 0, color: "inherit", cursor: "pointer", fontWeight: 700, fontSize: 16, padding: "0 4px" }}>✕</button>
+          </div>
+        )}
         <main className={`main ${locked && !KEEP_OPEN.some((p) => loc.pathname.startsWith(p)) ? "locked" : ""}`}>
           <Suspense fallback={<div className="empty">Loading…</div>}><Outlet /></Suspense>
         </main>
@@ -161,6 +198,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/forgot" element={<ForgotPassword />} />
+      <Route path="/reset-owner-password" element={<ResetOwnerPassword />} />
       <Route element={<Shell />}>
         <Route index element={a.isSuper ? <Navigate to="/schools" replace /> : a.isStudent ? <Navigate to="/me" replace /> : <Dashboard />} />
         <Route path="dashboard" element={<Navigate to="/" replace />} />
@@ -175,6 +213,7 @@ export default function App() {
         <Route path="messages" element={<Guard ok={!a.isSuper}><Messages /></Guard>} />
         <Route path="announcements" element={<Guard ok={!a.isSuper}><Announcements /></Guard>} />
         <Route path="attendance" element={<Guard ok={a.can("attendance.manage") || a.can("students.view")}><Attendance /></Guard>} />
+        <Route path="classes" element={<Guard ok={!a.isSuper && !a.isStudent}><Classes /></Guard>} />
         <Route path="new-year" element={<Guard ok={a.can("school.manage") && a.can("students.manage")}><NewYear /></Guard>} />
         <Route path="import" element={<Guard ok={a.can("students.manage") || a.can("staff.manage") || a.can("fees.manage") || a.can("subjects.manage") || a.can("content.manage") || a.can("marks.edit")}><SmartImport /></Guard>} />
         <Route path="billing" element={<Guard ok={a.role === "admin"}><MyBilling /></Guard>} />
@@ -184,6 +223,8 @@ export default function App() {
         <Route path="goals" element={<Guard ok={!a.isSuper}><Goals /></Guard>} />
         <Route path="about" element={<Guard ok={!a.isSuper}><About /></Guard>} />
         <Route path="approvals" element={<Guard ok={a.can("photos.approve")}><Approvals /></Guard>} />
+        <Route path="holidays" element={<Guard ok={!a.isSuper}><Holidays /></Guard>} />
+        <Route path="leaves" element={<Guard ok={!a.isSuper && !a.isStudent}><Leaves /></Guard>} />
         <Route path="users" element={<Guard ok={a.can("users.manage")}><UsersPage /></Guard>} />
         <Route path="schools" element={<Guard ok={a.isSuper}><Schools /></Guard>} />
         <Route path="schools/:id" element={<Guard ok={a.isSuper}><SchoolDetail /></Guard>} />

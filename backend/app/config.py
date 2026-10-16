@@ -23,3 +23,11 @@ CORS_ORIGINS = [
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
+
+# SMTP for owner password-reset emails (use a Gmail App Password, not your real Gmail password).
+# Leave empty to disable owner email recovery — security questions and the superadmin remain available.
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")       # your Gmail address
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")  # Gmail App Password
+SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USER)   # defaults to SMTP_USER

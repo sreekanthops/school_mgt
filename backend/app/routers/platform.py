@@ -186,7 +186,7 @@ def create_school(data: NewSchoolIn, sa: User = Depends(superadmin_only), db: Se
                   phone=data.phone, email=data.email, is_main=True))
     pw = gen_password()
     owner = User(school_id=school.id, username=make_code(school.id, "o", 1), password_hash=hash_password(pw),
-                 role="admin", full_name=data.owner_name)
+                 role="admin", full_name=data.owner_name, must_change=True)
     db.add(owner)
     audit(db, sa, "school_created", school, f"Owner login {owner.username}")
     db.commit()

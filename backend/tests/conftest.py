@@ -21,6 +21,13 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 
 
 def _user(db, **kw):
+    # Pre-populate recovery_hashes so test users are not gated by the mandatory-setup check.
+    # (Real users set these up on first login; test users are seeded as fully operational.)
+    if "recovery_hashes" not in kw and kw.get("role") not in ("student", "superadmin"):
+        from app.security import hash_password as hp
+        from app.routers.recovery import norm
+        kw["recovery_hashes"] = [hp(norm("testanswer")), hp(norm("testanswer2")), hp(norm("testanswer3"))]
+        kw.setdefault("recovery_q", "0,1,2")
     u = User(password_hash=hash_password(PW), **kw)
     db.add(u)
     db.flush()
@@ -82,3 +89,23 @@ def login(client, username, password=PW):
     r = client.post("/api/auth/login", json={"username": username, "password": password})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['token']}"}
+
+
+def onboard(client, username, temp_password, own_pw=None):
+    """Complete the mandatory new-user setup for non-student accounts:
+    1) Change the temporary password.
+    2) Set up recovery questions.
+    Returns auth headers usable for normal API calls.
+    """
+    if own_pw is None:
+        own_pw = temp_password + "Own1"
+    h = login(client, username, temp_password)
+    assert client.post("/api/auth/password", headers=h,
+                       json={"current_password": temp_password, "new_password": own_pw}).status_code == 204
+    h = login(client, username, own_pw)
+    qs = client.get("/api/auth/recovery/setup", headers=h).json()["questions"]
+    body = {"current_password": own_pw,
+            "answers": [{"id": q["id"], "answer": a}
+                        for q, a in zip(qs, ("Fluffy", "Oak Lane", "Maria"))]}
+    assert client.post("/api/auth/recovery/setup", headers=h, json=body).status_code == 204
+    return login(client, username, own_pw)

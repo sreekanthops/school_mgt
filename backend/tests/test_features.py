@@ -373,16 +373,18 @@ def test_invoice_lifecycle_extends_subscription(client, world):
     db = SessionLocal()
     db.get(School, world["a"]).subscription_end = date.today() + timedelta(days=10)
     db.get(School, world["a"]).plan = "Standard"
+    db.get(School, world["a"]).max_students = 200   # band ≤200 → Standard = ₹22,000/yr
     db.commit()
     db.close()
+    # expected amounts: 22000 + 18% GST = 22000 + 3960 = 25960
     r = client.post(f"/api/schools/{world['a']}/invoices", headers=sa, json={})
     assert r.status_code == 201
     inv = r.json()
-    assert inv["amount"] == 24000 and inv["tax"] == 4320 and inv["total"] == 28320 and inv["status"] == "Pending"
+    assert inv["amount"] == 22000 and inv["tax"] == 3960 and inv["total"] == 25960 and inv["status"] == "Pending"
     assert inv["period_start"] == (date.today() + timedelta(days=11)).isoformat()      # starts the day after the current end
     assert inv["number"].startswith("INV-") and inv["number"][-5:] == f"{inv['id']:05d}"
     s = client.get("/api/billing/summary", headers=sa).json()
-    assert s["pending"] == 28320 and s["collected"] == 0
+    assert s["pending"] == 25960 and s["collected"] == 0
     assert client.put(f"/api/invoices/{inv['id']}/pay", headers=sa, json={"mode": "Barter"}).status_code == 422
     paid = client.put(f"/api/invoices/{inv['id']}/pay", headers=sa, json={"mode": "UPI", "reference": "UTR1"})
     assert paid.json()["status"] == "Paid"
@@ -391,7 +393,7 @@ def test_invoice_lifecycle_extends_subscription(client, world):
     db.close()
     assert client.put(f"/api/invoices/{inv['id']}/pay", headers=sa, json={"mode": "UPI"}).status_code == 409      # not twice
     assert client.put(f"/api/invoices/{inv['id']}/cancel", headers=sa).status_code == 409
-    assert client.get("/api/billing/summary", headers=sa).json()["collected"] == 28320
+    assert client.get("/api/billing/summary", headers=sa).json()["collected"] == 25960
     assert client.get(f"/api/invoices/{inv['id']}/pdf", headers=sa).content[:5] == b"%PDF-"
     assert "INV-" in client.get("/api/invoices/export", headers=sa).content.decode()
 

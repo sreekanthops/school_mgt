@@ -311,15 +311,29 @@ function Activity({ s }) {
 function SchoolBilling({ s }) {
   const [tick, setTick] = useState(0);
   const [creating, setCreating] = useState(false);
+  const priceState = useLoad(() => api(`/schools/${s.id}/billing/price`), [s.id]);
   const state = useLoad(() => api(`/invoices?school_id=${s.id}`), [s.id, tick]);
   const sub = s.subscription_end ? `${s.subscription_status} · ends ${s.subscription_end}` : "No end date";
   return (
     <>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
-        <span className="muted">{s.plan} plan · {sub}</span>
+        <div>
+          <span className="muted">{s.plan} plan · {sub}</span>
+          <Async state={priceState}>
+            {(p) => p.suggested_annual > 0 && (
+              <span className="muted small" style={{ marginLeft: 12 }}>
+                Suggested: {inr(p.suggested_annual)}/yr or {inr(p.suggested_monthly)}/mo (before {p.tax_pct}% GST) for {s.max_students} students
+              </span>
+            )}
+          </Async>
+        </div>
         <button className="btn" onClick={() => setCreating(true)}>New invoice</button>
       </div>
-      {creating && <NewInvoice school={s} price={{ Free: 0, Standard: 24000, Premium: 60000 }[s.plan] ?? 0} onClose={() => setCreating(false)} onDone={() => setTick((t) => t + 1)} />}
+      {creating && (
+        <Async state={priceState}>
+          {(p) => <NewInvoice school={s} price={p.suggested_annual} onClose={() => setCreating(false)} onDone={() => setTick((t) => t + 1)} />}
+        </Async>
+      )}
       <Async state={state}>{(rows) => <InvoiceTable rows={rows} showSchool={false} onChange={() => { setTick((t) => t + 1); }} />}</Async>
     </>
   );

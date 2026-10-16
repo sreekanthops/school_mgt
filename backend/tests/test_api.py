@@ -45,10 +45,26 @@ def test_superadmin_creates_school_and_owner_logs_in_to_empty_school(client, wor
     # the owner login is generated: <school id><year>o001
     owner_id = r.json()["owner"]["username"]
     assert owner_id == f"{r.json()['school']['id']}{date.today().year}o001"
+    # Step 1: owner logs in with the temp password — must_change is True, API is blocked
     oh = login(client, owner_id, temp)
+    assert client.get("/api/auth/me", headers=oh).json()["must_change"] is True
+    assert client.get("/api/school", headers=oh).status_code == 403
+    # Step 2: owner changes the temp password — now must_setup_recovery becomes True
+    own_pw = "MyOwnSchoolPass1"
+    assert client.post("/api/auth/password", headers=oh, json={"current_password": temp, "new_password": own_pw}).status_code == 204
+    oh = login(client, owner_id, own_pw)
+    assert client.get("/api/auth/me", headers=oh).json()["must_setup_recovery"] is True
+    assert client.get("/api/school", headers=oh).status_code == 403
+    # Step 3: owner sets up recovery questions — now all gates clear
+    qs = client.get("/api/auth/recovery/setup", headers=oh).json()["questions"]
+    body = {"current_password": own_pw, "answers": [{"id": q["id"], "answer": a} for q, a in zip(qs, ("Fluffy", "Oak Lane", "Maria"))]}
+    assert client.post("/api/auth/recovery/setup", headers=oh, json=body).status_code == 204
+    oh = login(client, owner_id, own_pw)
+    assert client.get("/api/auth/me", headers=oh).json()["must_setup_recovery"] is False
+    # Now the owner can use the system
     assert client.get("/api/school", headers=oh).json()["name"] == "New Kids School"
     assert client.get("/api/dashboard", headers=oh).json()["counts"]["students"] == 0
-    # owner can now rename their own school
+    # owner can rename their own school
     assert client.put("/api/school", headers=oh, json={"name": "Renamed School"}).json()["name"] == "Renamed School"
 
 
@@ -112,10 +128,11 @@ def test_admin_can_delegate_user_management(client, world):
 
 
 def test_delegate_cannot_escalate(client, world):
+    from tests.conftest import onboard
     oh = login(client, "ownerA")
     r = client.post("/api/users", headers=oh, json={"username": "mgr", "full_name": "Manager One", "role": "staff",
                                                     "permissions": ["users.manage", "students.view"]})
-    mh = login(client, "mgr", r.json()["temp_password"])
+    mh = onboard(client, "mgr", r.json()["temp_password"])
     mk = lambda u, role, perms: client.post("/api/users", headers=mh, json={
         "username": u, "full_name": "Some Person", "role": role, "permissions": perms})
     assert mk("ok1", "staff", ["students.view"]).status_code == 201          # within own permissions

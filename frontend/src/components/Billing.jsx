@@ -10,7 +10,7 @@ export const INV_KIND = { Paid: "good", Pending: "warn", Overdue: "bad", Cancell
 const MODES = ["Bank Transfer", "UPI", "Cheque", "Cash", "Card"];
 
 const invoiceFields = (price) => [
-  { key: "amount", label: `Amount before tax (plan price ${inr(price)})`, type: "number", min: 0, max: 100000000 },
+  { key: "amount", label: `Amount before tax (suggested ${inr(price)})`, type: "number", min: 0, max: 100000000, default: price || "" },
   { key: "tax_pct", label: "Tax %", type: "number", min: 0, max: 100, default: 18 },
   { key: "period_start", label: "Service from (blank = after current end)", type: "date" },
   { key: "period_end", label: "Service until (blank = one year)", type: "date" },
@@ -24,6 +24,42 @@ export function NewInvoice({ school, price, onClose, onDone }) {
   return (
     <FormModal title={`New invoice · ${school.name || school.school}`} fields={invoiceFields(price)} submitLabel="Create invoice" onClose={onClose}
       onSubmit={async (b) => { await api(`/schools/${school.id ?? school.school_id}/invoices`, { method: "POST", body: clean(b) }); onDone(); }} />
+  );
+}
+
+/** Pricing reference table shown in the billing console. */
+function PricingTable({ table }) {
+  if (!table?.length) return null;
+  const plans = ["Starter", "Standard", "Premium"];
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h2 style={{ marginBottom: 12 }}>Pricing reference — annual (before 18% GST)</h2>
+      <p className="small muted" style={{ marginTop: 0, marginBottom: 12 }}>
+        Invoice amounts are pre-filled from this table based on each school's plan and student limit.
+        Monthly billing = annual ÷ 10 (2 months free vs paying monthly).
+        You can always override the amount on any individual invoice.
+      </p>
+      <div style={{ overflowX: "auto" }}>
+        <table>
+          <thead>
+            <tr>
+              <th>Strength (students)</th>
+              {plans.map((p) => <th key={p}>{p}</th>)}
+              <th>Monthly ÷ 10</th>
+            </tr>
+          </thead>
+          <tbody>
+            {table.map((row) => (
+              <tr key={row.band}>
+                <td><b>{row.band}</b></td>
+                {plans.map((p) => <td key={p}>{inr(row.plans[p])}</td>)}
+                <td className="small muted">e.g. {inr(Math.round(row.plans["Standard"] / 10))}/mo (Standard)</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -109,7 +145,7 @@ export default function Billing() {
     <Async state={sum}>
       {(s) => (
         <>
-          {creating && <NewInvoice school={creating} price={s.plan_prices[creating.plan] ?? 0} onClose={() => setCreating(null)} onDone={refresh} />}
+          {creating && <NewInvoice school={creating} price={creating.suggested_price ?? 0} onClose={() => setCreating(null)} onDone={refresh} />}
           <div className="grid g4" style={{ marginBottom: 16 }}>
             <Stat label="Collected" value={inr(s.collected)} tint="green" />
             <Stat label="Awaiting payment" value={inr(s.pending)} tint="amber" />
@@ -138,13 +174,14 @@ export default function Billing() {
                     <div className="row" style={{ gap: 6 }}>
                       <Badge kind={SUB_KIND[r.status]}>{r.status}</Badge>
                       {r.invoice_open ? <Badge kind="warn">Invoice open</Badge>
-                        : <button className="btn ghost sm" onClick={() => setCreating({ id: r.school_id, name: r.school, plan: r.plan })}><FilePlus2 size={13} /> Invoice</button>}
+                        : <button className="btn ghost sm" onClick={() => setCreating({ id: r.school_id, name: r.school, plan: r.plan, suggested_price: r.suggested_price })}><FilePlus2 size={13} /> Invoice</button>}
                     </div>
                   </div>
                 ))}
               </div>
             </div>
           </div>
+          <PricingTable table={s.pricing_table} />
           <div className="toolbar">
             <select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Status">
               <option value="">All invoices</option>{["Pending", "Overdue", "Paid", "Cancelled"].map((x) => <option key={x}>{x}</option>)}
