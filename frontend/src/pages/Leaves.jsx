@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { CheckCircle, ClipboardList, XCircle } from "lucide-react";
+import { CheckCircle, ClipboardList, Search, XCircle } from "lucide-react";
 import { api } from "../api.js";
 import { useAuth } from "../auth.jsx";
 import { Async, Badge, Modal, PageHead, useLoad } from "../components/ui.jsx";
@@ -53,6 +53,7 @@ export default function Leaves() {
   const { session, can } = useAuth();
   const canManage = session?.role === "admin" || can("leaves.manage");
   const [filter, setFilter] = useState("pending");
+  const [q, setQ] = useState("");
   const [dlg, setDlg] = useState(null);
   const [tick, setTick] = useState(0);
   const state = useLoad(
@@ -76,8 +77,20 @@ export default function Leaves() {
         ))}
       </div>
 
+      <div className="search" style={{ marginBottom: 14 }}>
+        <Search size={16} />
+        <input placeholder="Search by name, type, reason…" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+
       <Async state={state}>
-        {(leaves) => (
+        {(leaves) => {
+          const shown = q
+            ? leaves.filter((l) =>
+                (l.applicant_name || "").toLowerCase().includes(q.toLowerCase()) ||
+                l.leave_type.toLowerCase().includes(q.toLowerCase()) ||
+                (l.reason || "").toLowerCase().includes(q.toLowerCase()))
+            : leaves;
+          return (
           <>
             {leaves.length === 0 && (
               <div className="card">
@@ -87,8 +100,13 @@ export default function Leaves() {
                 </div>
               </div>
             )}
+            {leaves.length > 0 && shown.length === 0 && (
+              <div className="card">
+                <div className="muted" style={{ padding: "12px 0", textAlign: "center" }}>No results match "{q}".</div>
+              </div>
+            )}
             <div className="grid g2" style={{ alignItems: "start" }}>
-              {leaves.map((l) => (
+              {shown.map((l) => (
                 <div key={l.id} className="card" style={{ padding: "14px 16px" }}>
                   <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
                     <div>
@@ -150,7 +168,8 @@ export default function Leaves() {
               <ReviewModal lid={dlg.lid} action={dlg.action} onClose={() => setDlg(null)} onDone={reload} />
             )}
           </>
-        )}
+          );
+        }}
       </Async>
     </>
   );

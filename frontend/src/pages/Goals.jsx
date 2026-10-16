@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { api } from "../api.js";
 import { Async, Badge, Confirm, Empty, FormModal, Meter, PageHead, useLoad } from "../components/ui.jsx";
 
@@ -14,19 +14,30 @@ const kind = { Completed: "good", "In Progress": "warn", Planned: "" };
 
 export default function Goals() {
   const [tick, setTick] = useState(0);
+  const [q, setQ] = useState("");
   const [dlg, setDlg] = useState(null);
   const state = useLoad(() => api("/goals"), [tick]);
   const reload = () => setTick((t) => t + 1);
 
   return (
     <Async state={state}>
-      {(d) => (
+      {(d) => {
+        const shown = q
+          ? d.items.filter((g) =>
+              g.title.toLowerCase().includes(q.toLowerCase()) ||
+              g.description.toLowerCase().includes(q.toLowerCase()))
+          : d.items;
+        return (
         <>
           <PageHead title="Future Goals" sub="Where the school is headed">
             {d.can_manage && <button className="btn" onClick={() => setDlg({ type: "add" })}><Plus size={16} /> Add goal</button>}
           </PageHead>
+          <div className="search" style={{ marginBottom: 14 }}>
+            <Search size={16} />
+            <input placeholder="Search goals…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
           <div className="grid g2">
-            {d.items.map((g) => (
+            {shown.map((g) => (
               <div key={g.id} className="card">
                 <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
@@ -49,6 +60,7 @@ export default function Goals() {
               </div>
             ))}
           </div>
+          {d.items.length > 0 && shown.length === 0 && <div className="card"><Empty>No goals match "{q}".</Empty></div>}
           {d.items.length === 0 && <div className="card"><Empty>No goals added yet.</Empty></div>}
           {dlg?.type === "add" && (
             <FormModal title="Add goal" fields={fields} onClose={() => setDlg(null)}
@@ -63,7 +75,8 @@ export default function Goals() {
               onConfirm={async () => { await api(`/goals/${dlg.g.id}`, { method: "DELETE" }); reload(); }} />
           )}
         </>
-      )}
+        );
+      }}
     </Async>
   );
 }

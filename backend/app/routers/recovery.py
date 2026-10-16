@@ -105,7 +105,11 @@ class ForgotQIn(BaseModel):
 
 class ForgotResetIn(BaseModel):
     username: str = Field(min_length=1, max_length=50)
-    answers: list[str] = Field(min_length=COUNT, max_length=COUNT)
+    # Each entry carries the question id the user selected plus their answer.
+    # This lets the user pick and answer all three questions in a single form
+    # without a separate "fetch questions for this username" round-trip that
+    # would allow enumeration of which accounts exist.
+    answers: list[AnswerIn] = Field(min_length=COUNT, max_length=COUNT)
     new_password: str = Field(min_length=10, max_length=128)
 
 
@@ -205,12 +209,33 @@ def forgot_reset(data: ForgotResetIn, request: Request, db: Session = Depends(ge
     if ready and user.school_id:
         school = db.get(School, user.school_id)
         ready = bool(school and school.active)
-    hashes = user.recovery_hashes if ready else [_DUMMY_HASH] * COUNT
-    # check all three every time so a wrong first answer takes as long as a wrong last one
-    results = [verify_password(norm(a), h) for a, h in zip(data.answers, hashes)]
-    if not (ready and all(results)):
+
+    if not ready:
+        # Evaluate dummy hashes so timing is identical to the real path.
+        for _ in data.answers:
+            verify_password(norm("dummy"), _DUMMY_HASH)
         record_failure(key)
         raise HTTPException(400, GENERIC_FAIL)
+
+    # Build a map of question_index -> hash from the stored recovery data.
+    stored_ids = [int(x) for x in user.recovery_q.split(",")]
+    id_to_hash: dict[int, str] = dict(zip(stored_ids, user.recovery_hashes))
+
+    # The user must submit exactly the 3 question IDs they set up (order doesn't matter).
+    submitted_ids = [a.id for a in data.answers]
+    if sorted(submitted_ids) != sorted(stored_ids):
+        # Wrong question selection — treat as wrong answers; timing is kept uniform.
+        for a in data.answers:
+            verify_password(norm(a.answer), _DUMMY_HASH)
+        record_failure(key)
+        raise HTTPException(400, GENERIC_FAIL)
+
+    # Verify every answer against its corresponding hash (constant-time for all three).
+    results = [verify_password(norm(a.answer), id_to_hash[a.id]) for a in data.answers]
+    if not all(results):
+        record_failure(key)
+        raise HTTPException(400, GENERIC_FAIL)
+
     user.password_hash = hash_password(data.new_password)
     user.must_change = False
     db.commit()

@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { ArrowLeft, KeyRound, LifeBuoy, Lock, Mail, ShieldAlert, UserCheck } from "lucide-react";
+import { ArrowLeft, KeyRound, LifeBuoy, Lock, Mail, ShieldAlert } from "lucide-react";
 import { api } from "../api.js";
 import { useAuth } from "../auth.jsx";
 
 /**
  * Forgot-password — three tiers.
  *
- * Tier 1 (all users):  Enter your Login ID → answer the 3 questions YOU set at first login
- *                       → if all 3 match → choose a new password.
+ * Tier 1 (all users):  Enter your Login ID + pick the 3 questions YOU set at first login
+ *                       and type in your answers — all in one form, no separate step to
+ *                       "fetch" questions (avoids leaking which accounts exist).
+ *                       If all 3 match you can choose a new password immediately.
  *                       After 5 wrong attempts the account is locked for a cooldown period.
  *
  * Tier 2 (all users):  Still can't get in? → contact IT / school admin in person.
@@ -18,54 +20,75 @@ import { useAuth } from "../auth.jsx";
  * Tier 3 (owner only): If you are the school owner → enter the Gmail address you saved in
  *                       My Account → a one-time reset link (15 min) is emailed to you.
  */
+
+/** All 12 questions in the bank — must match backend QUESTIONS list order. */
+const QUESTIONS = [
+  "What was the name of your first pet, or a pet you loved as a child?",
+  "What was the name of the street you lived on as a child?",
+  "What is the first name of your childhood best friend?",
+  "In which town or village did your mother grow up?",
+  "What was the name of the first school you attended?",
+  "What is the surname of your favourite teacher?",
+  "What was the first film you watched in a cinema?",
+  "What is the title of the first book you remember loving?",
+  "What is the first name of your paternal grandmother?",
+  "What was your favourite game to play as a child?",
+  "What was the first dish you learned to cook, or loved eating as a child?",
+  "What was the name of your favourite toy or cartoon character as a child?",
+];
+
+const DEFAULT_IDS = [0, 1, 2]; // initial placeholder selections
+
 export default function ForgotPassword() {
   const { session } = useAuth();
 
-  // Tier 1 state machine: "id" → "questions" → "done"
-  const [step, setStep] = useState("id");
+  // Tier 1 — single combined form
+  const [step, setStep] = useState("form"); // "form" | "done"
   const [username, setUsername] = useState("");
-  const [qs, setQs] = useState([]);
-  const [answers, setAnswers] = useState(["", "", ""]);
+  // Each slot: { id: questionIndex, answer: string }
+  const [slots, setSlots] = useState(DEFAULT_IDS.map((id) => ({ id, answer: "" })));
   const [pw, setPw] = useState({ a: "", b: "" });
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // Tier 3 state machine
+  // Tier 3 state
   const [ownerEmail, setOwnerEmail] = useState("");
-  const [ownerStep, setOwnerStep] = useState("idle"); // idle | sent
+  const [ownerStep, setOwnerStep] = useState("idle"); // "idle" | "sent"
   const [ownerErr, setOwnerErr] = useState("");
   const [ownerBusy, setOwnerBusy] = useState(false);
 
   if (session) return <Navigate to="/" replace />;
 
-  // ── Tier 1 handlers ──────────────────────────────────────────────────────────
-  async function ask(e) {
-    e.preventDefault();
-    setBusy(true);
-    setErr("");
-    try {
-      const r = await api("/auth/forgot/questions", {
-        method: "POST",
-        body: { username: username.trim() },
-      });
-      setQs(r.questions);
-      setStep("questions");
-    } catch (x) {
-      setErr(x.message);
-    } finally {
-      setBusy(false);
-    }
+  // ── helpers ──────────────────────────────────────────────────────────────────
+  function setSlotId(i, id) {
+    setSlots(slots.map((s, j) => (j === i ? { ...s, id: Number(id) } : s)));
+  }
+  function setSlotAnswer(i, answer) {
+    setSlots(slots.map((s, j) => (j === i ? { ...s, answer } : s)));
   }
 
-  async function reset(e) {
+  /** Questions available for a given slot (not selected in any other slot). */
+  function available(slotIndex) {
+    const taken = new Set(slots.map((s, j) => (j !== slotIndex ? s.id : null)));
+    return QUESTIONS.map((text, id) => ({ id, text })).filter((q) => !taken.has(q.id));
+  }
+
+  // ── Tier 1 submit ─────────────────────────────────────────────────────────────
+  async function submit(e) {
     e.preventDefault();
-    if (pw.a !== pw.b) return setErr("The two passwords do not match");
+    if (pw.a !== pw.b) return setErr("The two passwords do not match.");
+    const ids = slots.map((s) => s.id);
+    if (new Set(ids).size !== 3) return setErr("Please choose three different questions.");
     setBusy(true);
     setErr("");
     try {
       await api("/auth/forgot/reset", {
         method: "POST",
-        body: { username: username.trim(), answers, new_password: pw.a },
+        body: {
+          username: username.trim(),
+          answers: slots.map((s) => ({ id: s.id, answer: s.answer })),
+          new_password: pw.a,
+        },
       });
       setStep("done");
     } catch (x) {
@@ -75,7 +98,7 @@ export default function ForgotPassword() {
     }
   }
 
-  // ── Tier 3 handler ───────────────────────────────────────────────────────────
+  // ── Tier 3 handler ────────────────────────────────────────────────────────────
   async function sendOwnerEmail(e) {
     e.preventDefault();
     setOwnerBusy(true);
@@ -108,8 +131,9 @@ export default function ForgotPassword() {
             <div>
               <b>Answer your security questions</b>
               <p style={{ opacity: 0.85, margin: "4px 0 0" }}>
-                Enter your Login ID. You will be shown the exact three questions <em>you</em> answered
-                when you first set up your account. All three must match to reset your password.
+                Enter your Login ID, pick the three questions <em>you</em> chose when you first set
+                up your account, type in your answers, and set a new password — all in one go.
+                Answers are not case-sensitive and punctuation is ignored.
                 After 5 wrong attempts the form locks for a cooldown period.
               </p>
             </div>
@@ -122,7 +146,7 @@ export default function ForgotPassword() {
               <p style={{ opacity: 0.85, margin: "4px 0 0" }}>
                 If you cannot answer the questions, contact the school's admin office or IT department
                 in person. They will issue a temporary password from the Users &amp; Access page.
-                The moment you sign in with it you will be prompted to choose your own password —
+                The moment you sign in with it you <em>must</em> choose your own password —
                 this is mandatory and cannot be skipped.
               </p>
             </div>
@@ -147,64 +171,63 @@ export default function ForgotPassword() {
         <div className="login-card">
           <Link to="/login" className="backlink"><ArrowLeft size={14} /> Back to sign in</Link>
 
-          {/* ── TIER 1: enter login ID ─────────────────────────────────────── */}
-          {step === "id" && (
-            <form onSubmit={ask}>
+          {/* ── TIER 1: combined single form ──────────────────────────────────── */}
+          {step === "form" && (
+            <form onSubmit={submit}>
               <h1 style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <UserCheck size={20} /> Step 1 — your security questions
-              </h1>
-              <p className="muted" style={{ marginBottom: 18, marginTop: 4 }}>
-                Enter your Login ID. You will be shown the three questions <b>you</b> set up —
-                only you know the answers.
-              </p>
-              {err && <div className="error">{err}</div>}
-              <div className="field" style={{ marginBottom: 18 }}>
-                <label htmlFor="fu">Login ID</label>
-                <input id="fu" value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  autoComplete="username" required autoFocus />
-              </div>
-              <button className="btn" style={{ width: "100%", justifyContent: "center" }} disabled={busy}>
-                {busy ? "Please wait…" : "Continue"}
-              </button>
-            </form>
-          )}
-
-          {/* ── TIER 1: answer questions ───────────────────────────────────── */}
-          {step === "questions" && (
-            <form onSubmit={reset}>
-              <h1 style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <ShieldAlert size={20} /> Your security questions
+                <ShieldAlert size={20} /> Reset your password
               </h1>
               <p className="muted" style={{ marginBottom: 16, marginTop: 4 }}>
-                These are the three questions <b>you</b> answered when you first set up your account.
-                Answers are not case-sensitive; punctuation and extra spaces are ignored.
+                Enter your Login ID, select the three questions <b>you</b> answered when you first
+                set up your account, fill in the answers, and choose a new password.
               </p>
+
               {err && <div className="error">{err}</div>}
-              {qs.map((q, i) => (
-                <div className="field" style={{ marginBottom: 12 }} key={q.id}>
-                  <label htmlFor={`fq${i}`}>{i + 1}. {q.text}</label>
-                  <input id={`fq${i}`} value={answers[i]} maxLength={80} required autoComplete="off"
-                    onChange={(e) => setAnswers(answers.map((a, j) => j === i ? e.target.value : a))} />
+
+              <div className="field" style={{ marginBottom: 14 }}>
+                <label htmlFor="fu">Login ID</label>
+                <input id="fu" value={username} required autoFocus autoComplete="username"
+                  onChange={(e) => setUsername(e.target.value)} />
+              </div>
+
+              {slots.map((slot, i) => (
+                <div key={i} style={{ marginBottom: 12, padding: "10px 12px", background: "var(--surface,#f7f8fa)", borderRadius: 6, border: "1px solid var(--border,#e5e7eb)" }}>
+                  <div className="field" style={{ marginBottom: 8 }}>
+                    <label htmlFor={`qsel${i}`}>Question {i + 1}</label>
+                    <select id={`qsel${i}`} value={slot.id} required
+                      onChange={(e) => setSlotId(i, e.target.value)}
+                      style={{ width: "100%" }}>
+                      {available(i).map((q) => (
+                        <option key={q.id} value={q.id}>{q.text}</option>
+                      ))}
+                      {/* Keep the current selection visible even if it'd be "taken" by another slot */}
+                      {!available(i).find((q) => q.id === slot.id) && (
+                        <option value={slot.id}>{QUESTIONS[slot.id]}</option>
+                      )}
+                    </select>
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label htmlFor={`ans${i}`}>Your answer</label>
+                    <input id={`ans${i}`} value={slot.answer} required maxLength={80}
+                      autoComplete="off"
+                      onChange={(e) => setSlotAnswer(i, e.target.value)} />
+                  </div>
                 </div>
               ))}
-              <div className="field" style={{ marginBottom: 12 }}>
+
+              <div className="field" style={{ marginBottom: 10, marginTop: 4 }}>
                 <label htmlFor="fp1">New password (min 10 characters)</label>
                 <input id="fp1" type="password" minLength={10} maxLength={128} required
                   autoComplete="new-password" value={pw.a}
                   onChange={(e) => setPw({ ...pw, a: e.target.value })} />
               </div>
-              <div className="field" style={{ marginBottom: 18 }}>
+              <div className="field" style={{ marginBottom: 16 }}>
                 <label htmlFor="fp2">Confirm new password</label>
                 <input id="fp2" type="password" required autoComplete="new-password" value={pw.b}
                   onChange={(e) => setPw({ ...pw, b: e.target.value })} />
               </div>
               <button className="btn" style={{ width: "100%", justifyContent: "center" }} disabled={busy}>
                 <KeyRound size={15} /> {busy ? "Checking…" : "Reset my password"}
-              </button>
-              <button type="button" className="btn ghost" style={{ width: "100%", justifyContent: "center", marginTop: 8 }}
-                onClick={() => { setStep("id"); setErr(""); setAnswers(["", "", ""]); setPw({ a: "", b: "" }); }}>
-                ← Try a different Login ID
               </button>
             </form>
           )}
@@ -227,13 +250,13 @@ export default function ForgotPassword() {
                 <Lock size={15} /> Still can't get in? Ask IT / admin for a temp password
               </h2>
               <p className="small muted" style={{ margin: "0 0 10px" }}>
-                Contact the school's admin office or IT department in person and ask them to issue you
-                a <b>temporary password</b> from the <em>Users &amp; Access</em> page.
+                Contact the school's admin office or IT department <b>in person</b> and ask them to
+                issue you a <b>temporary password</b> from the <em>Users &amp; Access</em> page.
                 When you sign in with it you <b>must</b> choose your own password immediately —
                 you cannot access anything else until you do.
               </p>
               <div className="notice" style={{ fontSize: 13 }}>
-                <b>Important:</b> the admin can only reset passwords for staff and student accounts —
+                <b>Note:</b> the admin can only reset passwords for staff and student accounts —
                 not for the school owner. Owners must use the Gmail reset below or contact platform support.
               </div>
             </div>
@@ -246,8 +269,8 @@ export default function ForgotPassword() {
                 <Mail size={15} /> School owner? Reset via Gmail
               </h2>
               <p className="small muted" style={{ margin: "0 0 12px" }}>
-                Only works if you saved a Gmail recovery address in <em>My Account → Gmail recovery</em>.
-                A one-time reset link valid for 15 minutes will be sent to that address.
+                Only works if you saved a Gmail recovery address in <em>My Account → Gmail recovery</em>
+                before forgetting your password. A one-time reset link valid for 15 minutes will be sent.
               </p>
 
               {ownerStep === "idle" && (

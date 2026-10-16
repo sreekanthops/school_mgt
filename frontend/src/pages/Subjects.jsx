@@ -10,6 +10,7 @@ export default function Subjects() {
   const [tick, setTick] = useState(0);
   const [search] = useSearchParams();
   const [grade, setGrade] = useState(search.get("grade") || "1");
+  const [q, setQ] = useState("");
   const [dlg, setDlg] = useState(null);
   const state = useLoad(() => api("/subjects"), [tick]);
   const reload = () => setTick((t) => t + 1);
@@ -18,6 +19,9 @@ export default function Subjects() {
     <Async state={state}>
       {(d) => {
         const cur = d.grades.find((g) => g.grade === grade) ?? d.grades[0];
+        const shown = q
+          ? cur.subjects.filter((s) => s.name.toLowerCase().includes(q.toLowerCase()))
+          : cur.subjects;
         return (
           <>
             <PageHead title="Subjects" sub="Pick a class, then open a subject to see its chapters">
@@ -30,8 +34,12 @@ export default function Subjects() {
                 </button>
               ))}
             </div>
+            <div className="search" style={{ marginBottom: 14 }}>
+              <Search size={16} />
+              <input placeholder="Search subjects…" value={q} onChange={(e) => setQ(e.target.value)} />
+            </div>
             <div className="grid g3">
-              {cur.subjects.map((s) => (
+              {shown.map((s) => (
                 <div key={s.id} className="card subject-card">
                   <div className="top">
                     <Link to={`/subjects/${s.id}`} className="row" style={{ color: "inherit" }}>
@@ -49,6 +57,7 @@ export default function Subjects() {
                   <div className="small muted">{s.teachers.length ? `Taught by ${s.teachers.join(", ")}` : "No teacher assigned"}</div>
                 </div>
               ))}
+              {cur.subjects.length > 0 && shown.length === 0 && <div className="card empty" style={{ gridColumn: "1 / -1" }}>No subjects match "{q}".</div>}
               {cur.subjects.length === 0 && <div className="card empty" style={{ gridColumn: "1 / -1" }}>No subjects for {gradeLabel(cur.grade)} yet.</div>}
             </div>
             {dlg?.type === "add" && (

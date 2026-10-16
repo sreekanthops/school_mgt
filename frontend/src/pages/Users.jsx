@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ExternalLink, Filter, GraduationCap, KeyRound, Pencil, Plus, ShieldCheck, Trash2, Users } from "lucide-react";
+import { ExternalLink, Filter, GraduationCap, KeyRound, Pencil, Plus, Search, ShieldCheck, Trash2, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "../api.js";
 import { useAuth } from "../auth.jsx";
@@ -191,7 +191,7 @@ function UserRow({ u, session, onEdit, onReset, onToggle, onDel }) {
 
 // ── section wrapper ───────────────────────────────────────────────────────────
 
-function Section({ icon: Icon, title, sub, count, tint, children, action }) {
+function Section({ icon: Icon, title, sub, count, tint, children, action, q, onQ, searchPlaceholder }) {
   return (
     <div style={{ marginBottom: 28 }}>
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -209,7 +209,16 @@ function Section({ icon: Icon, title, sub, count, tint, children, action }) {
             <div className="small muted">{sub}</div>
           </div>
         </div>
-        {action}
+        <div className="row" style={{ gap: 8 }}>
+          {onQ && (
+            <div className="search" style={{ margin: 0 }}>
+              <Search size={14} />
+              <input placeholder={searchPlaceholder || "Search…"} value={q} onChange={(e) => onQ(e.target.value)}
+                style={{ width: 160 }} />
+            </div>
+          )}
+          {action}
+        </div>
       </div>
       <div className="card flush" style={{ overflowX: "auto" }}>
         {children}
@@ -233,6 +242,7 @@ function EmptyRow({ cols, message }) {
 function StudentSection({ students, session, actions, onAdd }) {
   const [filterGrade, setFilterGrade] = useState("");
   const [filterSection, setFilterSection] = useState("");
+  const [q, setQ] = useState("");
 
   // Available grades from the actual data
   const availGrades = GRADES.filter((g) => students.some((u) => u.grade === g));
@@ -247,10 +257,12 @@ function StudentSection({ students, session, actions, onAdd }) {
   const visible = students.filter((u) => {
     if (filterGrade && u.grade !== filterGrade) return false;
     if (filterSection && u.section !== filterSection) return false;
+    if (q && !u.full_name.toLowerCase().includes(q.toLowerCase()) &&
+            !u.username.toLowerCase().includes(q.toLowerCase())) return false;
     return true;
   });
 
-  const filterActive = filterGrade || filterSection;
+  const filterActive = filterGrade || filterSection || q;
 
   return (
     <div style={{ marginBottom: 28 }}>
@@ -374,6 +386,8 @@ export default function UsersPage() {
   const [tick, setTick] = useState(0);
   const [dlg, setDlg] = useState(null);
   const [secret, setSecret] = useState(null);
+  const [qAdmin, setQAdmin] = useState("");
+  const [qStaff, setQStaff] = useState("");
 
   const state = useLoad(async () => {
     const [users, perms, students, staff] = await Promise.all([
@@ -410,6 +424,11 @@ export default function UsersPage() {
           const staff    = d.users.filter((u) => u.role === "staff");
           const students = d.users.filter((u) => u.role === "student");
 
+          const filt = (arr, q) => q
+            ? arr.filter((u) => u.full_name.toLowerCase().includes(q.toLowerCase()) ||
+                                u.username.toLowerCase().includes(q.toLowerCase()))
+            : arr;
+
           return (
             <>
               {/* ── ADMINS ─────────────────────────────────────────────────── */}
@@ -419,6 +438,7 @@ export default function UsersPage() {
                 title="Admins"
                 sub="Full access to everything — add carefully"
                 count={admins.length}
+                q={qAdmin} onQ={setQAdmin} searchPlaceholder="Search admins…"
                 action={
                   <button className="btn sm" onClick={() => setDlg({ type: "add", role: "admin" })}>
                     <Plus size={14} /> Add admin
@@ -429,7 +449,8 @@ export default function UsersPage() {
                   <thead><tr><th>User</th><th>Access</th><th>Status</th><th /></tr></thead>
                   <tbody>
                     {admins.length === 0 && <EmptyRow cols={4} message="No admin accounts." />}
-                    {admins.map((u) => <UserRow key={u.id} u={u} session={session} {...actions(u)} />)}
+                    {admins.length > 0 && filt(admins, qAdmin).length === 0 && <EmptyRow cols={4} message={`No admins match "${qAdmin}".`} />}
+                    {filt(admins, qAdmin).map((u) => <UserRow key={u.id} u={u} session={session} {...actions(u)} />)}
                   </tbody>
                 </table>
               </Section>
@@ -441,6 +462,7 @@ export default function UsersPage() {
                 title="Staff"
                 sub="Teachers and non-teaching staff — grant only the permissions each person needs"
                 count={staff.length}
+                q={qStaff} onQ={setQStaff} searchPlaceholder="Search staff…"
                 action={
                   <button className="btn sm" onClick={() => setDlg({ type: "add", role: "staff" })}>
                     <Plus size={14} /> Add staff login
@@ -451,7 +473,8 @@ export default function UsersPage() {
                   <thead><tr><th>User</th><th>Permissions</th><th>Status</th><th /></tr></thead>
                   <tbody>
                     {staff.length === 0 && <EmptyRow cols={4} message="No staff logins yet. Create one to give a staff member access." />}
-                    {staff.map((u) => <UserRow key={u.id} u={u} session={session} {...actions(u)} />)}
+                    {staff.length > 0 && filt(staff, qStaff).length === 0 && <EmptyRow cols={4} message={`No staff match "${qStaff}".`} />}
+                    {filt(staff, qStaff).map((u) => <UserRow key={u.id} u={u} session={session} {...actions(u)} />)}
                   </tbody>
                 </table>
               </Section>

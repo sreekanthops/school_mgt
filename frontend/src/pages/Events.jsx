@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+import { MapPin, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { api } from "../api.js";
 import { Async, Badge, Confirm, Empty, FormModal, PageHead, useLoad } from "../components/ui.jsx";
 
@@ -14,6 +14,7 @@ const fields = [
 
 export default function Events() {
   const [tick, setTick] = useState(0);
+  const [q, setQ] = useState("");
   const [dlg, setDlg] = useState(null);
   const state = useLoad(() => api("/events"), [tick]);
   const reload = () => setTick((t) => t + 1);
@@ -21,13 +22,24 @@ export default function Events() {
 
   return (
     <Async state={state}>
-      {(d) => (
+      {(d) => {
+        const shown = q
+          ? d.items.filter((e) =>
+              e.title.toLowerCase().includes(q.toLowerCase()) ||
+              e.category.toLowerCase().includes(q.toLowerCase()) ||
+              e.location.toLowerCase().includes(q.toLowerCase()))
+          : d.items;
+        return (
         <>
           <PageHead title="Events" sub="Upcoming and past school events">
             {d.can_manage && <button className="btn" onClick={() => setDlg({ type: "add" })}><Plus size={16} /> Add event</button>}
           </PageHead>
+          <div className="search" style={{ marginBottom: 14 }}>
+            <Search size={16} />
+            <input placeholder="Search events…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
           <div className="grid">
-            {d.items.map((e) => {
+            {shown.map((e) => {
               const dt = new Date(e.date + "T00:00:00");
               return (
                 <div key={e.id} className="card row" style={{ alignItems: "flex-start" }}>
@@ -54,6 +66,7 @@ export default function Events() {
                 </div>
               );
             })}
+            {d.items.length > 0 && shown.length === 0 && <div className="card"><Empty>No events match "{q}".</Empty></div>}
             {d.items.length === 0 && <div className="card"><Empty>No events yet.</Empty></div>}
           </div>
           {dlg?.type === "add" && (
@@ -69,7 +82,8 @@ export default function Events() {
               onConfirm={async () => { await api(`/events/${dlg.e.id}`, { method: "DELETE" }); reload(); }} />
           )}
         </>
-      )}
+        );
+      }}
     </Async>
   );
 }

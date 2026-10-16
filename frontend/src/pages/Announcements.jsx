@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Megaphone, Pin, PinOff, Plus, Trash2 } from "lucide-react";
+import { Megaphone, Pin, PinOff, Plus, Search, Trash2 } from "lucide-react";
 import { api, GRADES, gradeLabel } from "../api.js";
 import { useAuth } from "../auth.jsx";
 import { Async, Badge, Confirm, Modal, PageHead, useLoad } from "../components/ui.jsx";
@@ -67,6 +67,7 @@ function Composer({ onClose, onDone }) {
 export default function Announcements() {
   const { can } = useAuth();
   const [tick, setTick] = useState(0);
+  const [q, setQ] = useState("");
   const [composing, setComposing] = useState(false);
   const [del, setDel] = useState(null);
   const state = useLoad(async () => {
@@ -84,10 +85,20 @@ export default function Announcements() {
       {composing && <Composer onClose={() => setComposing(false)} onDone={refresh} />}
       {del && <Confirm title="Delete announcement" message={`Delete "${del.title}" for everyone?`} onClose={() => setDel(null)}
         onConfirm={async () => { await api(`/announcements/${del.id}`, { method: "DELETE" }); refresh(); }} />}
+      <div className="search" style={{ marginBottom: 14 }}>
+        <Search size={16} />
+        <input placeholder="Search announcements…" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
       <Async state={state}>
-        {(rows) => (
+        {(rows) => {
+          const shown = q
+            ? rows.filter((a) =>
+                a.title.toLowerCase().includes(q.toLowerCase()) ||
+                a.body.toLowerCase().includes(q.toLowerCase()))
+            : rows;
+          return (
           <div className="stack">
-            {rows.map((a) => (
+            {shown.map((a) => (
               <article key={a.id} className={`card notice ${a.pinned ? "pinned" : ""}`}>
                 <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div className="row" style={{ gap: 10, alignItems: "flex-start" }}>
@@ -116,9 +127,11 @@ export default function Announcements() {
                 <p className="notice-body">{a.body}</p>
               </article>
             ))}
+            {rows.length > 0 && shown.length === 0 && <div className="card empty">No announcements match "{q}".</div>}
             {rows.length === 0 && <div className="card empty">No announcements yet.</div>}
           </div>
-        )}
+          );
+        }}
       </Async>
     </>
   );

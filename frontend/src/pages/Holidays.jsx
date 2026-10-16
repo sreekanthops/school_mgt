@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Plus, Pencil, Trash2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Plus, Pencil, Search, Trash2 } from "lucide-react";
 import { api } from "../api.js";
 import { useAuth } from "../auth.jsx";
 import { Async, Confirm, Modal, PageHead, useLoad } from "../components/ui.jsx";
@@ -93,6 +93,7 @@ export default function Holidays() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
+  const [q, setQ] = useState("");
   const [dlg, setDlg] = useState(null);
   const [tick, setTick] = useState(0);
   const state = useLoad(() => api(`/holidays?year=${year}`), [year, tick]);
@@ -223,9 +224,18 @@ export default function Holidays() {
 
                 {/* Full year list */}
                 <div className="card">
-                  <h3 style={{ marginTop: 0 }}>All holidays in {year}</h3>
+                  <div className="row" style={{ justifyContent: "space-between", marginBottom: 12, alignItems: "center" }}>
+                    <h3 style={{ margin: 0 }}>All holidays in {year}</h3>
+                  </div>
+                  <div className="search" style={{ marginBottom: 10 }}>
+                    <Search size={15} />
+                    <input placeholder="Search holidays…" value={q} onChange={(e) => setQ(e.target.value)} />
+                  </div>
                   {allHolidays.length === 0 && <div className="muted">No holidays added yet for {year}.</div>}
-                  {allHolidays.map((h) => (
+                  {allHolidays.length > 0 && q && allHolidays.filter((h) => h.name.toLowerCase().includes(q.toLowerCase())).length === 0 && (
+                    <div className="muted">No holidays match "{q}".</div>
+                  )}
+                  {allHolidays.filter((h) => !q || h.name.toLowerCase().includes(q.toLowerCase())).map((h) => (
                     <div key={h.id} className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
                       <div>
                         <b style={{ fontSize: 13 }}>{h.name}</b>

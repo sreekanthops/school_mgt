@@ -747,10 +747,11 @@ def test_recovery_setup_validation(client, world):
 
 def test_forgot_password_with_correct_answers(client, world):
     ids = _setup_recovery(client)
-    qs = client.post("/api/auth/forgot/questions", json={"username": "kid1"}).json()["questions"]
-    assert [q["id"] for q in qs] == ids  # the same questions again, same order
-    # case, spacing and punctuation do not matter
-    r = client.post("/api/auth/forgot/reset", json={"username": "kid1", "answers": [" REX ", "maple   street!", "anil"],
+    # New single-form API: answers carry question IDs alongside the answers.
+    # Case, spacing and punctuation must not matter.
+    answers = [{"id": ids[0], "answer": " REX "}, {"id": ids[1], "answer": "maple   street!"},
+               {"id": ids[2], "answer": "anil"}]
+    r = client.post("/api/auth/forgot/reset", json={"username": "kid1", "answers": answers,
                                                      "new_password": "BrandNewPass123"})
     assert r.status_code == 204
     assert client.post("/api/auth/login", json={"username": "kid1", "password": PW}).status_code == 401
@@ -758,20 +759,29 @@ def test_forgot_password_with_correct_answers(client, world):
 
 
 def test_forgot_password_wrong_answers_generic_and_locks(client, world):
-    _setup_recovery(client)
-    bad = lambda: client.post("/api/auth/forgot/reset", json={"username": "kid1", "answers": ["Rex", "Maple Street", "Wrong"],
+    ids = _setup_recovery(client)
+    good_answers = [{"id": ids[0], "answer": "Rex"}, {"id": ids[1], "answer": "Maple Street"},
+                    {"id": ids[2], "answer": "Anil"}]
+    wrong_answers = [{"id": ids[0], "answer": "Rex"}, {"id": ids[1], "answer": "Maple Street"},
+                     {"id": ids[2], "answer": "Wrong"}]
+    bad = lambda: client.post("/api/auth/forgot/reset", json={"username": "kid1",
+                                                              "answers": wrong_answers,
                                                               "new_password": "BrandNewPass123"})
     first = bad()
     assert first.status_code == 400
     # an unknown user and a user with no recovery set up get the identical response
-    ghost = client.post("/api/auth/forgot/reset", json={"username": "nobody-x", "answers": ["aaa", "bbb", "ccc"], "new_password": "BrandNewPass123"})
-    unset = client.post("/api/auth/forgot/reset", json={"username": "ownerA", "answers": ["aaa", "bbb", "ccc"], "new_password": "BrandNewPass123"})
+    dummy_ans = [{"id": 0, "answer": "aaa"}, {"id": 1, "answer": "bbb"}, {"id": 2, "answer": "ccc"}]
+    ghost = client.post("/api/auth/forgot/reset", json={"username": "nobody-x",
+                                                        "answers": dummy_ans, "new_password": "BrandNewPass123"})
+    unset = client.post("/api/auth/forgot/reset", json={"username": "ownerA",
+                                                        "answers": dummy_ans, "new_password": "BrandNewPass123"})
     assert ghost.json() == unset.json() == first.json() and ghost.status_code == unset.status_code == 400
     for _ in range(4):
         bad()
     assert bad().status_code == 429
     # even the right answers are refused while locked, and the password is unchanged
-    ok = client.post("/api/auth/forgot/reset", json={"username": "kid1", "answers": ["Rex", "Maple Street", "Anil"], "new_password": "BrandNewPass123"})
+    ok = client.post("/api/auth/forgot/reset", json={"username": "kid1",
+                                                     "answers": good_answers, "new_password": "BrandNewPass123"})
     assert ok.status_code == 429
     login(client, "kid1")
 
@@ -787,12 +797,29 @@ def test_forgot_questions_do_not_reveal_which_accounts_exist(client, world):
     assert ghost1.json() == ghost2.json()  # a stable decoy, not different every time
 
 
+def test_forgot_password_wrong_question_ids(client, world):
+    ids = _setup_recovery(client)
+    # Submit the right answers but for wrong question IDs — should be rejected.
+    wrong_ids = [(ids[0] + 1) % 12, (ids[1] + 2) % 12, (ids[2] + 3) % 12]
+    # Make sure we didn't accidentally end up with the real IDs.
+    if sorted(wrong_ids) == sorted(ids):
+        wrong_ids = [(ids[0] + 3) % 12, (ids[1] + 4) % 12, (ids[2] + 5) % 12]
+    answers = [{"id": wrong_ids[0], "answer": "Rex"}, {"id": wrong_ids[1], "answer": "Maple Street"},
+               {"id": wrong_ids[2], "answer": "Anil"}]
+    r = client.post("/api/auth/forgot/reset", json={"username": "kid1",
+                                                    "answers": answers, "new_password": "BrandNewPass123"})
+    assert r.status_code == 400
+
+
 def test_disabled_user_cannot_recover(client, world):
-    _setup_recovery(client)
+    ids = _setup_recovery(client)
     oh = login(client, "ownerA")
     uid = next(u["id"] for u in client.get("/api/users", headers=oh).json() if u["username"] == "kid1")
     client.put(f"/api/users/{uid}", headers=oh, json={"active": False})
-    r = client.post("/api/auth/forgot/reset", json={"username": "kid1", "answers": ["Rex", "Maple Street", "Anil"], "new_password": "BrandNewPass123"})
+    answers = [{"id": ids[0], "answer": "Rex"}, {"id": ids[1], "answer": "Maple Street"},
+               {"id": ids[2], "answer": "Anil"}]
+    r = client.post("/api/auth/forgot/reset", json={"username": "kid1",
+                                                    "answers": answers, "new_password": "BrandNewPass123"})
     assert r.status_code == 400
 
 

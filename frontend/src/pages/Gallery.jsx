@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ImageIcon, Pencil, Plus, Trash2 } from "lucide-react";
+import { ImageIcon, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { api } from "../api.js";
 import { Async, Confirm, Empty, FormModal, PageHead, Photo, PhotoUpload, useLoad } from "../components/ui.jsx";
 
@@ -21,6 +21,7 @@ function Pic({ g }) {
 export default function Gallery() {
   const [tick, setTick] = useState(0);
   const [cat, setCat] = useState("");
+  const [q, setQ] = useState("");
   const [dlg, setDlg] = useState(null);
   const state = useLoad(() => api("/gallery"), [tick]);
   const reload = () => setTick((t) => t + 1);
@@ -29,12 +30,21 @@ export default function Gallery() {
     <Async state={state}>
       {(d) => {
         const cats = [...new Set(d.items.map((i) => i.category))];
-        const items = cat ? d.items.filter((i) => i.category === cat) : d.items;
+        const byCat = cat ? d.items.filter((i) => i.category === cat) : d.items;
+        const items = q
+          ? byCat.filter((i) =>
+              i.title.toLowerCase().includes(q.toLowerCase()) ||
+              (i.caption || "").toLowerCase().includes(q.toLowerCase()))
+          : byCat;
         return (
           <>
             <PageHead title="Gallery" sub="Moments from around the school">
               {d.can_manage && <button className="btn" onClick={() => setDlg({ type: "add" })}><Plus size={16} /> Add item</button>}
             </PageHead>
+            <div className="search" style={{ marginBottom: 10 }}>
+              <Search size={16} />
+              <input placeholder="Search gallery…" value={q} onChange={(e) => setQ(e.target.value)} />
+            </div>
             <div className="tabs">
               <button className={cat === "" ? "on" : ""} onClick={() => setCat("")}>All</button>
               {cats.map((c) => <button key={c} className={cat === c ? "on" : ""} onClick={() => setCat(c)}>{c}</button>)}
@@ -58,7 +68,8 @@ export default function Gallery() {
                 </div>
               ))}
             </div>
-            {items.length === 0 && <div className="card"><Empty>No gallery items yet.</Empty></div>}
+            {d.items.length > 0 && items.length === 0 && <div className="card"><Empty>No items match your search.</Empty></div>}
+            {d.items.length === 0 && <div className="card"><Empty>No gallery items yet.</Empty></div>}
             {dlg?.type === "add" && (
               <FormModal title="Add gallery item" fields={fields} onClose={() => setDlg(null)}
                 onSubmit={async (b) => { await api("/gallery", { method: "POST", body: b }); reload(); }} />
