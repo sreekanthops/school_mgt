@@ -13,6 +13,7 @@ import Login from "./pages/Login.jsx";
 import ResetOwnerPassword from "./pages/ResetOwnerPassword.jsx";
 
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
+const StaffHome = lazy(() => import("./pages/StaffHome.jsx"));
 const Students = lazy(() => import("./pages/Students.jsx"));
 const StudentDetail = lazy(() => import("./pages/StudentDetail.jsx"));
 const Fees = lazy(() => import("./pages/Fees.jsx"));
@@ -42,7 +43,8 @@ const MyBilling = lazy(() => import("./components/Billing.jsx").then((m) => ({ d
 
 /** [path, label, icon, visible(auth) , group] */
 const NAV = [
-  ["/", "Dashboard", LayoutDashboard, (a) => !a.isStudent && !a.isSuper, "Overview"],
+  ["/", "Dashboard", LayoutDashboard, (a) => !a.isStudent && !a.isSuper && a.role !== "staff", "Overview"],
+  ["/", "My Dashboard", LayoutDashboard, (a) => a.role === "staff", "Overview"],
   ["/me", "My Profile", UserCircle, (a) => a.isStudent, "Overview"],
   ["/students", "Students", GraduationCap, (a) => !a.isSuper, "School"],
   ["/staff", "Staff", Users, (a) => !a.isSuper, "School"],
@@ -200,7 +202,12 @@ export default function App() {
       <Route path="/forgot" element={<ForgotPassword />} />
       <Route path="/reset-owner-password" element={<ResetOwnerPassword />} />
       <Route element={<Shell />}>
-        <Route index element={a.isSuper ? <Navigate to="/schools" replace /> : a.isStudent ? <Navigate to="/me" replace /> : <Dashboard />} />
+        <Route index element={
+          a.isSuper ? <Navigate to="/schools" replace />
+          : a.isStudent ? <Navigate to="/me" replace />
+          : a.role === "staff" ? <StaffHome />
+          : <Dashboard />
+        } />
         <Route path="dashboard" element={<Navigate to="/" replace />} />
         <Route path="me" element={<Guard ok={a.isStudent}><StudentDetail me /></Guard>} />
         <Route path="students" element={<Guard ok={!a.isSuper}><Students /></Guard>} />

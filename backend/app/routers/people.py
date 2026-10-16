@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 from .. import analytics, storage
 from ..db import get_db
 from ..deps import can_see_fees, can_see_student, get_owned, get_student, next_code, staff_letter, year_of
-from ..models import (EXAM_MAX, Attendance, Chapter, ClassPeriod, Event, Fee, GalleryItem, Goal, Mark,
-                      Payment, School, Staff, Student, Subject, User)
+from ..models import (EXAM_MAX, Announcement, Attendance, Chapter, ClassPeriod, DirectMessage,
+                      Event, Fee, GalleryItem, Goal, Holiday, Mark,
+                      Payment, School, Staff, StaffLeave, Student, Subject, User)
 from . import attendance
 from ..schemas import FeeIn, MarkIn, PaymentIn, StaffIn, StudentIn
 from ..security import (PRINCIPAL_DEFAULT, TEACHER_DEFAULT, gen_password, hash_password, need, perm_set, school_user,
@@ -78,6 +79,202 @@ def dashboard(year: Optional[str] = None, user: User = Depends(staff_side), db: 
         for g in d["by_grade"]:
             g["pending_fee"] = None
     return d
+
+
+# ---------- staff personal dashboard ----------
+
+@router.get("/staff/me/dashboard")
+def staff_dashboard(year: Optional[str] = None,
+                    user: User = Depends(school_user),
+                    db: Session = Depends(get_db)):
+    """Personal dashboard for the signed-in staff member.
+    Returns today's schedule, full week schedule, subjects taught with mark stats,
+    pending leave count, recent announcements, upcoming holidays and unread message count.
+    """
+    if user.role not in ("staff",):
+        raise HTTPException(403, "This endpoint is for staff members only")
+    if not user.staff_id:
+        raise HTTPException(403, "No staff profile linked to this account")
+
+    staff = db.get(Staff, user.staff_id)
+    if not staff:
+        raise HTTPException(404, "Staff profile not found")
+
+    year = year_of(db, user.school_id, year)
+    today_name = date.today().strftime("%a")[:3]  # Mon / Tue / ...
+
+    # ── timetable: all periods assigned to this teacher ───────────────────────
+    periods = db.scalars(
+        select(ClassPeriod)
+        .where(ClassPeriod.school_id == user.school_id,
+               ClassPeriod.staff_id == user.staff_id,
+               ClassPeriod.period_number < 90)
+        .order_by(ClassPeriod.day_of_week, ClassPeriod.period_number)
+    ).all()
+
+    subj_ids = {p.subject_id for p in periods if p.subject_id}
+    subj_map: dict[int, Subject] = ({s.id: s for s in db.scalars(
+        select(Subject).where(Subject.id.in_(subj_ids)))} if subj_ids else {})
+
+    DAYS_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+    def _period_out(p: ClassPeriod) -> dict:
+        subj = subj_map.get(p.subject_id) if p.subject_id else None
+        return {
+            "id": p.id,
+            "grade": p.grade,
+            "section": p.section,
+            "day_of_week": p.day_of_week,
+            "period_number": p.period_number,
+            "start_time": p.start_time,
+            "end_time": p.end_time,
+            "subject_id": p.subject_id,
+            "subject_name": subj.name if subj else None,
+        }
+
+    today_periods = [_period_out(p) for p in periods if p.day_of_week == today_name]
+    week_by_day: dict[str, list] = {d: [] for d in DAYS_ORDER}
+    for p in periods:
+        if p.day_of_week in week_by_day:
+            week_by_day[p.day_of_week].append(_period_out(p))
+
+    # ── subjects taught: resolve from staff.subjects field ────────────────────
+    subject_names = [n.strip() for n in (staff.subjects or "").split(",") if n.strip()]
+    taught_subjects = list(db.scalars(
+        select(Subject).where(
+            Subject.school_id == user.school_id,
+            Subject.name.in_(subject_names),
+        ).order_by(Subject.grade, Subject.name)
+    )) if subject_names else []
+
+    # ── mark stats per taught subject: avg, top, count, weak ─────────────────
+    subject_stats = []
+    for subj in taught_subjects:
+        rows = db.execute(
+            select(Mark.student_id,
+                   func.avg(Mark.score * 100.0 / Mark.max_score).label("avg_pct"),
+                   func.count().label("entries"))
+            .where(Mark.subject_id == subj.id, Mark.academic_year == year)
+            .group_by(Mark.student_id)
+        ).all()
+        if not rows:
+            subject_stats.append({
+                "id": subj.id, "name": subj.name, "grade": subj.grade,
+                "student_count": 0, "avg_pct": None, "top_pct": None,
+                "weak_count": 0, "strong_count": 0,
+            })
+            continue
+        scores = [r.avg_pct for r in rows if r.avg_pct is not None]
+        weak   = sum(1 for s in scores if s < 50)
+        strong = sum(1 for s in scores if s >= 85)
+        subject_stats.append({
+            "id": subj.id,
+            "name": subj.name,
+            "grade": subj.grade,
+            "student_count": len(rows),
+            "avg_pct": round(sum(scores) / len(scores), 1) if scores else None,
+            "top_pct":  round(max(scores), 1) if scores else None,
+            "weak_count": weak,
+            "strong_count": strong,
+        })
+
+    # ── also gather per-section classes taught from timetable ─────────────────
+    sections_taught = sorted({
+        (p.grade, p.section) for p in periods
+    }, key=lambda x: (x[0], x[1]))
+    classes_taught = [{"grade": g, "section": s} for g, s in sections_taught]
+
+    # ── pending leaves for this staff member ─────────────────────────────────
+    pending_leaves = db.scalar(
+        select(func.count()).select_from(StaffLeave)
+        .where(StaffLeave.staff_id == user.staff_id,
+               StaffLeave.status == "pending")
+    ) or 0
+
+    # student leaves assigned to this teacher as reviewer ─────────────────────
+    reviewer_pending = db.scalar(
+        select(func.count()).select_from(StaffLeave)
+        .where(StaffLeave.reviewer_user_id == user.id,
+               StaffLeave.status == "pending")
+    ) or 0
+
+    # ── unread messages ───────────────────────────────────────────────────────
+    unread_messages = db.scalar(
+        select(func.count()).select_from(DirectMessage)
+        .where(DirectMessage.recipient_id == user.id,
+               DirectMessage.read.is_(False),
+               DirectMessage.hidden_recipient.is_(False))
+    ) or 0
+
+    # ── recent announcements (last 5 visible to this role) ────────────────────
+    ann_rows = db.scalars(
+        select(Announcement)
+        .where(Announcement.school_id == user.school_id,
+               Announcement.audience.in_(["all", "staff"]))
+        .order_by(Announcement.created_at.desc())
+        .limit(5)
+    ).all()
+    announcements = [
+        {"id": a.id, "title": a.title, "body": a.body[:200],
+         "created_at": a.created_at.isoformat() + "Z", "pinned": a.pinned}
+        for a in ann_rows
+    ]
+
+    # ── upcoming holidays (next 30 days) ─────────────────────────────────────
+    today = date.today()
+    upcoming_holidays = [
+        {"id": h.id, "date": h.date.isoformat(), "name": h.name, "category": h.category}
+        for h in db.scalars(
+            select(Holiday)
+            .where(Holiday.school_id == user.school_id,
+                   Holiday.date >= today)
+            .order_by(Holiday.date)
+            .limit(5)
+        )
+    ]
+
+    # ── recent approved leaves history (last 5) ───────────────────────────────
+    recent_leaves = []
+    for leave in db.scalars(
+        select(StaffLeave)
+        .where(StaffLeave.staff_id == user.staff_id)
+        .order_by(StaffLeave.applied_at.desc())
+        .limit(5)
+    ):
+        days = (leave.to_date - leave.from_date).days + 1
+        recent_leaves.append({
+            "id": leave.id,
+            "from_date": leave.from_date.isoformat(),
+            "to_date": leave.to_date.isoformat(),
+            "leave_type": leave.leave_type,
+            "status": leave.status,
+            "days": days,
+        })
+
+    return {
+        "staff": {
+            "id": staff.id,
+            "name": staff.name,
+            "designation": staff.designation,
+            "department": staff.department,
+            "employee_id": staff.employee_id,
+            "class_teacher_of": staff.class_teacher_of,
+            "has_photo": bool(staff.photo),
+            "photo_v": storage.version(staff.photo),
+        },
+        "year": year,
+        "today": today_name,
+        "today_periods": today_periods,
+        "week_schedule": week_by_day,
+        "classes_taught": classes_taught,
+        "subject_stats": subject_stats,
+        "pending_leaves": pending_leaves,
+        "reviewer_pending": reviewer_pending,
+        "recent_leaves": recent_leaves,
+        "unread_messages": unread_messages,
+        "announcements": announcements,
+        "upcoming_holidays": upcoming_holidays,
+    }
 
 
 # ---------- attendance badge helper ----------
