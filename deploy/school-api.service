@@ -1,0 +1,27 @@
+[Unit]
+Description=School Management API (Uvicorn / FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=school
+Group=school
+WorkingDirectory=/opt/school/backend
+Environment="PATH=/opt/school/backend/.venv/bin"
+EnvironmentFile=/opt/school/backend/.env
+ExecStart=/opt/school/backend/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --no-access-log
+Restart=always
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths=/opt/school/db /opt/school/backend/uploads
+
+[Install]
+WantedBy=multi-user.target
